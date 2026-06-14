@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from .. import db
 from ..planner import Decision
+from .results import ToolResult
 from .tools import TOOLS
 
 
@@ -26,15 +27,24 @@ def idempotency_key(workflow_id: str, step_index: int) -> str:
 
 class Executor:
     def run_tool(self, decision: Decision) -> dict:
-        """Execute a read-only tool call. No side effects, so naturally idempotent."""
+        """Dispatch a tool call through the defensive tool layer (ch06).
+
+        Tools return a ToolResult (ok / degraded / partial / failure); never an
+        exception or bare garbage. We serialize it to a dict for the durable log.
+        """
         tool = decision.tool
         if tool not in TOOLS:
-            return {"ok": False, "error": f"unknown tool: {tool}"}
+            return {"ok": False, "tool": tool, "status": "failure",
+                    "data": None, "reason": f"unknown tool: {tool}", "missing": []}
         try:
-            data = TOOLS[tool](decision.args)
-            return {"ok": True, "tool": tool, "data": data}
-        except Exception as e:  # ch06 replaces this with classified, defensive handling
-            return {"ok": False, "tool": tool, "error": str(e)}
+            res = TOOLS[tool](decision.args)
+        except Exception as e:
+            # The wrapper handles upstream failures; this only guards against a bug
+            # in the tool itself, still turning it into an honest failure.
+            res = ToolResult.failure(f"tool raised: {e}")
+        d = res.to_dict()
+        d["tool"] = tool
+        return d
 
     def record_proposal(
         self, conn, workflow_id: str, step_index: int, hypothesis: str, remediation: str

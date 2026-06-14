@@ -17,6 +17,13 @@ log; now there is also **conversation state** in Redis (ephemeral, regenerated
 from task state so it can never drift) and **long-term memory** in a vector store
 keyed by service and symptom, with a staleness policy.
 
+**ch06** turns the basic read-only calls into the real **defensive tool layer**:
+six tools, each behind a wrapper that applies a timeout, classifies failures
+(transient retry / auth refresh / permanent stop), validates the response schema
+before reading, and returns an honest result (ok / degraded / partial / failure)
+instead of throwing or returning garbage. `scoped_kubectl` enforces its allowlist
+and the forbidden actions in the tool itself. Both flavors of contract test ship.
+
 ```
 agent/
   scope.yaml              the ch03 boundary as config (read at startup)
@@ -35,13 +42,35 @@ agent/
       orchestrator.py     the investigation loop (now recalls + remembers + narrates)
     executor/
       executor.py         runs steps; idempotency key on the side-effecting one
-      tools.py            basic read-only tools (ch06 hardens these)
+      results.py          ch06: ToolResult (ok / degraded / partial / failure)
+      schemas.py          ch06: response-shape schemas (validate before reading)
+      wrapper.py          ch06: defensive_call + failure classification + gather
+      tools.py            ch06: the six tools, each behind the wrapper
     cli.py                command line
   tests/
     test_resume.py        ch04: crash/resume + idempotency
     test_memory.py        ch05: recall, idempotent writes, staleness
     test_conversation.py  ch05: regenerate-from-task-state survives eviction
+    test_tools_contract.py ch06: fake-backend contract tests (every commit)
+    test_tools_real.py    ch06: real-upstream contract tests (catch drift)
 ```
+
+## The six tools (ch06)
+
+| Tool | Upstream | Drift defense | Failure behavior |
+|------|----------|---------------|------------------|
+| `promql_query` | Prometheus | schema-validated | partial / clean failure |
+| `log_search` | Loki | schema-validated | partial / clean failure |
+| `trace_lookup` | Tempo (empty until ch09) | schema-validated | clean failure |
+| `deploy_history` | deploy ledger | schema-validated | clean failure |
+| `runbook_search` | runbooks dir | schema-validated | clean failure |
+| `scoped_kubectl` | cluster | schema + allowlist | refuses off-allowlist / forbidden |
+
+Every tool goes through `defensive_call`: timeout, classify-and-retry, validate
+the response shape **before** reading any field, then return an honest result.
+The two flavors of contract test, fake-backend (every commit) and real-upstream
+(catches actual drift), both ship. `make agent-tools` shows them all running,
+including the allowlist refusing a forbidden `restart payments`.
 
 ## The three kinds of state (ch05)
 
@@ -69,7 +98,8 @@ make agent-setup   # create the agent venv and install deps
 make agent-init    # create the agent database and schema
 make agent-demo    # the ch04 showcase: crash mid-run, then resume
 make agent-memory  # the ch05 showcase: recall a past incident, staleness, conversation
-make agent-test    # the durability + memory tests
+make agent-tools   # the ch06 showcase: the six tools + allowlist enforcement
+make agent-test    # the full suite (durability, memory, contract tests)
 ```
 
 Or directly:
@@ -106,12 +136,12 @@ regenerate it.
 
 ## What's still basic here
 
-The tools in `executor/tools.py` are read-only and undefended on purpose. Chapter
-6 turns them into the real tool layer: schema validation, timeouts, retries,
-fallbacks, partial results, contract tests, and the allowlist on the one tool
-that can change the world. Remediations stay shadow-only until the chapter 12
-rollout work. The memory embedder is a deterministic local one so the demo runs
-offline; swap in a real embedding model and vector DB for production.
+The tool layer is now defensive (ch06), but `scoped_kubectl` writes stay
+simulated and shadow-only until the chapter 12 rollout work, so nothing in the
+real environment is mutated yet. `trace_lookup` queries Tempo, which is empty
+until the chapter 9 build emits traces. The memory embedder is a deterministic
+local one so the demo runs offline; swap in a real embedding model and vector DB
+for production.
 
 ## Configuration
 

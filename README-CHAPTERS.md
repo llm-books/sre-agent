@@ -79,3 +79,11 @@ Chapter 05 includes:
 - Orchestrator now recalls similar past incidents at the start, folds a relevant non-stale recollection into its hypothesis (never overriding current signals), and remembers each incident on conclude.
 - New: demo-memory CLI + make agent-memory; recall and conversation inspection commands; memory table added to the schema; redis dependency.
 - Verified: demo-memory shows a second incident recalling the first at similarity 1.0, the hypothesis carrying a Memory clause, the conversation regenerated from task state, and a version change flipping the recollection to stale. Full suite 6/6 (2 ch04 + 4 ch05) passes.
+
+Chapter 06 includes:
+- The defensive tool layer under sre_agent/executor/: results.py (ToolResult: ok/degraded/partial/failure), schemas.py (response-shape schemas, validate before reading), wrapper.py (defensive_call with timeout, transient/auth/permanent classification, retry with backoff, fallback, and a gather() helper for partial results), tools.py (the six tools, each behind the wrapper).
+- Six tools, no overlap: promql_query (Prometheus), log_search (Loki), trace_lookup (Tempo, empty until ch09), deploy_history (ledger), runbook_search (runbooks dir), scoped_kubectl.
+- scoped_kubectl enforces its allowlist and the forbidden actions IN THE TOOL: refuses delete, refuses restart of payments, refuses blind all-services actions, gates writes behind approval (execution still simulated until ch12), refuses anything off the allowlist.
+- Both contract-test flavors: test_tools_contract.py (fake-backend, every commit: drift -> clean failure, transient -> retry, auth -> refresh-once, permanent -> no retry, exhausted -> fallback/degraded, gather -> partial) and test_tools_real.py (real Prometheus/Loki/ledger/runbooks shape checks, skip if env down).
+- New: demo-tools CLI + make agent-tools.
+- Verified: demo-tools shows all six tools returning ok against the live env, a bad PromQL query becoming a clean failure (not garbage), and scoped_kubectl refusing every forbidden case. Full suite 26/26 passes.

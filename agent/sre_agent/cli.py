@@ -196,6 +196,44 @@ def cmd_demo_memory(args):
         print(f"     sim={r.similarity} stale={r.stale} (stored v={r.service_version}, current v={orch._current_version(svc)})")
 
 
+def cmd_demo_tools(args):
+    from .executor.tools import TOOLS
+
+    print("Six tools, each behind the defensive wrapper (ok / degraded / partial / failure):\n")
+    checks = [
+        ("promql_query", {"query": "histogram_quantile(0.95, sum by (service, le) "
+                                    "(rate(http_request_duration_seconds_bucket[1m])))"}),
+        ("log_search", {"service": "orders"}),
+        ("trace_lookup", {"service": "orders"}),
+        ("deploy_history", {"service": "api-gateway"}),
+        ("runbook_search", {"query": "payments timeout"}),
+    ]
+    for name, a in checks:
+        res = TOOLS[name](a)
+        detail = f"data={res.data}" if res.ok else f"reason={res.reason}"
+        print(f"  {name:16} status={res.status:8} {detail}")
+
+    print("\nThe drift defense: a bad upstream response becomes a clean failure, not garbage:")
+    bad = TOOLS["promql_query"]({"query": "this is not (valid promql"})
+    print(f"  promql_query(bad query)   status={bad.status:8} reason={bad.reason}")
+
+    print("\nscoped_kubectl enforces its allowlist and forbidden actions in the tool itself:")
+    cases = [
+        {"command": "get", "target": "orders"},
+        {"command": "restart", "target": "payments"},
+        {"command": "delete", "target": "orders"},
+        {"command": "rollout-restart", "target": "all"},
+        {"command": "rollout-restart", "target": "orders"},
+        {"command": "rollout-restart", "target": "orders", "approved": True},
+        {"command": "hack", "target": "orders"},
+    ]
+    for c in cases:
+        res = TOOLS["scoped_kubectl"](c)
+        label = f"{c['command']} {c['target']}" + (" (approved)" if c.get("approved") else "")
+        outcome = f"OK   {res.data.get('note')}" if res.ok else f"REFUSED {res.reason}"
+        print(f"  {label:28} -> {outcome}")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="sre_agent", description="SRE agent (ch04)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -235,6 +273,8 @@ def main(argv=None):
     pdm = sub.add_parser("demo-memory")
     pdm.add_argument("--service", default="orders")
     pdm.set_defaults(func=cmd_demo_memory)
+
+    sub.add_parser("demo-tools").set_defaults(func=cmd_demo_tools)
 
     args = p.parse_args(argv)
     args.func(args)

@@ -102,6 +102,10 @@ agent-demo: $(VENV) ## Run the ch04 crash/resume showcase
 agent-memory: $(VENV) ## Run the ch05 memory + conversation showcase (needs Redis)
 	cd agent && .venv/bin/python -m sre_agent demo-memory
 
+.PHONY: agent-tools
+agent-tools: $(VENV) ## Run the ch06 defensive tool-layer showcase
+	cd agent && .venv/bin/python -m sre_agent demo-tools
+
 .PHONY: agent-run
 agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...
 	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE)

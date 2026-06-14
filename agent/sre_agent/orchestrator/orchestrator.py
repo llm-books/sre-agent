@@ -19,7 +19,7 @@ from psycopg.types.json import Json
 from .. import db, scope
 from ..conversation import ConversationStore
 from ..executor.executor import Executor
-from ..executor.tools import deploy_history
+from ..executor.tools import fetch_deploys
 from ..memory.store import MemoryStore
 from ..planner import Decision, Planner, default_planner
 from ..state import Incident, InvestigationState
@@ -201,8 +201,10 @@ class Orchestrator:
     def _current_version(self, service: str) -> str | None:
         """The service's current version from the deploy ledger. A memory stored
         under a different version is treated as potentially stale."""
-        dh = deploy_history(service)
-        deploys = dh.get("deploys") or []
+        try:
+            deploys = fetch_deploys(service).get("deploys") or []
+        except Exception:
+            return None
         if not deploys:
             return None
         latest = max(deploys, key=lambda d: d.get("ts", ""))
