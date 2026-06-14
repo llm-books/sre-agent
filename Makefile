@@ -131,6 +131,10 @@ agent-drift: $(VENV) ## Show drift detection over both families (agent + environ
 agent-drift-demo: $(VENV) ## Inject the silent failure and watch environment drift catch it
 	cd agent && .venv/bin/python -m sre_agent demo-drift
 
+.PHONY: agent-cost
+agent-cost: $(VENV) ## Run the ch10 cost showcase (caching, routing, and a token budget)
+	cd agent && .venv/bin/python -m sre_agent demo-cost
+
 .PHONY: agent-run
 agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...
 	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE)

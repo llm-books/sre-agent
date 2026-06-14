@@ -114,3 +114,11 @@ Chapter 09 includes:
 - New CLI: drift, demo-drift, demo-trace; make agent-trace / agent-drift / agent-drift-demo. OTel python deps added.
 - TWO REAL BUGS found and fixed while building: (1) the Go service reset() did `*f = faults{}` while holding the mutex, replacing the mutex itself -> "fatal: Unlock of unlocked RWMutex" crash-loop on every /admin/reset (latent since ch03, masked because the crash-restart cleared faults anyway); fixed to reset fields individually. (2) promql_query returned NaN for zero-denominator ratios, which is invalid JSON and broke the durable-log write; fixed to drop non-finite samples.
 - Verified: demo-trace shows the agent trace in Tempo (root=incident); demo-drift shows queue 0 -> inject silent failure -> queue 165 [DRIFT] caught with no alert -> cleared; trace_lookup returns real service traces. Full suite 43/43 passes. Suggested tag: ch09. Part III complete in code.
+
+Chapter 10 includes:
+- Cost model in sre_agent/cost.py: per-incident token cost dominated by the context that grows with accumulated evidence (late steps are the expensive ones). Token counts are ESTIMATED from context size for the scripted planner; the same math takes real usage from the LLM planner.
+- Three levers, all shown shrinking the cost: prompt caching of the stable prefix (system prompt + tool defs), model routing (routine "pick the next tool" decisions -> cheap model; only the diagnosis -> capable), and per-incident token budgets.
+- profile_run() reads a run's decide steps from the durable log and reports naive / cached / routed cost plus a daily projection.
+- Budget enforcement in the orchestrator (run(budget_tokens=...)): _decide() checks cumulative_input_tokens against the budget and, when reached, forces a graceful conclude+escalate instead of spending through. The decide span carries a cost.input_tokens_estimate attribute.
+- New CLI: cost --id WF, demo-cost; make agent-cost.
+- Verified: demo-cost shows full investigation naive $0.0208/incident -> routed $0.0040 (80.9% savings; $208/day -> $40/day at 10k incidents/day), and a 2500-token budget making the agent wrap up early after 2 findings and escalate. Cost math unit-tested (caching < naive, routing < cached, routing assignment, monotonic cumulative, budget early-wrapup). Full suite 48/48 passes. Suggested tag: ch10.

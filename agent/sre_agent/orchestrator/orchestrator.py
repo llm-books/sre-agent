@@ -16,7 +16,7 @@ import re
 
 from psycopg.types.json import Json
 
-from .. import db, scope
+from .. import cost, db, scope
 from ..conversation import ConversationStore
 from ..executor.executor import Executor
 from ..executor.tools import fetch_deploys
@@ -87,7 +87,8 @@ class Orchestrator:
 
     # ---- the loop -----------------------------------------------------------
 
-    def run(self, workflow_id: str, crash_after: int | None = None) -> InvestigationState:
+    def run(self, workflow_id: str, crash_after: int | None = None,
+            budget_tokens: int | None = None) -> InvestigationState:
         conn = db.connect()
         try:
             wf = conn.execute(
@@ -137,10 +138,12 @@ class Orchestrator:
                         # recorded decision is replayed, so resume reuses it.
                         with tracing.span("model.decide") as sp:
                             tracing.set_attr(sp, "step.index", step_index)
+                            tracing.set_attr(sp, "cost.input_tokens_estimate",
+                                             cost.cumulative_input_tokens(state.step_count))
                             result, replayed = engine.get_or_record_step(
                                 conn, workflow_id, step_index, "decide",
                                 {"evidence_count": state.step_count},
-                                compute=lambda c: self.planner.next_step(state).to_dict(),
+                                compute=lambda c: self._decide(state, budget_tokens),
                             )
                             if not replayed:
                                 d = Decision.from_dict(result)
@@ -202,6 +205,20 @@ class Orchestrator:
             conn.close()
 
     # ---- helpers ------------------------------------------------------------
+
+    def _decide(self, state: InvestigationState, budget_tokens: int | None) -> dict:
+        """The next decision, unless the token budget is reached, in which case the
+        agent wraps up gracefully with what it has and escalates, rather than
+        spending through the ceiling."""
+        if budget_tokens and cost.cumulative_input_tokens(state.step_count) > budget_tokens:
+            return Decision(
+                action="conclude",
+                hypothesis=(f"Investigation of {state.incident.service} stopped at the token "
+                            f"budget after {state.step_count} findings; conclusion is partial."),
+                remediation="Escalate to a human to continue; the agent stopped at its budget.",
+                reason="token budget reached",
+            ).to_dict()
+        return self.planner.next_step(state).to_dict()
 
     def _replay_state(self, conn, workflow_id: str, incident: Incident) -> InvestigationState:
         state = InvestigationState(incident=incident)

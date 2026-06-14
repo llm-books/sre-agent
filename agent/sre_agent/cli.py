@@ -240,6 +240,44 @@ def cmd_eval(args):
     print(format_report(report))
 
 
+def _print_cost(p):
+    print(f"   steps={p.steps}  input_tokens={p.total_input_tokens}")
+    print(f"   naive (all capable, no cache):    ${p.naive_usd:.5f} / incident")
+    print(f"   + prompt caching:                 ${p.cached_usd:.5f} / incident")
+    print(f"   + model routing (cheap routine):  ${p.routed_usd:.5f} / incident")
+    print(f"   total savings vs naive: {p.savings_pct()}%")
+    daily = 10000
+    print(f"   at {daily:,} incidents/day:  ${p.naive_usd * daily:.2f}/day  ->  "
+          f"${p.routed_usd * daily:.2f}/day")
+
+
+def cmd_cost(args):
+    from .cost import profile_run
+    _print_cost(profile_run(args.id))
+
+
+def cmd_demo_cost(args):
+    from .cost import profile_run
+    orch = Orchestrator(use_memory=False)
+    incident = Incident(alert="HighRequestLatency", service="orders")
+
+    print("1) Full investigation, cost profile (naive vs cached vs routed):")
+    wf = make_workflow_id(incident, run=5151)
+    orch.reset(wf)
+    orch.start(incident, run=5151)
+    orch.run(wf)
+    _print_cost(profile_run(wf))
+
+    print("\n2) The same incident under a tight 2500-token budget:")
+    wf2 = make_workflow_id(incident, run=5152)
+    orch.reset(wf2)
+    orch.start(incident, run=5152)
+    state = orch.run(wf2, budget_tokens=2500)
+    print(f"   the agent wrapped up early and escalated, rather than spending through:")
+    print(f"   \"{state.hypothesis}\"")
+    _print_cost(profile_run(wf2))
+
+
 def cmd_drift(args):
     from .observability.drift import drift_report
     rep = drift_report()
@@ -434,6 +472,11 @@ def main(argv=None):
     pg.set_defaults(func=cmd_gate)
 
     sub.add_parser("demo-gate").set_defaults(func=cmd_demo_gate)
+
+    pco = sub.add_parser("cost")
+    pco.add_argument("--id", required=True)
+    pco.set_defaults(func=cmd_cost)
+    sub.add_parser("demo-cost").set_defaults(func=cmd_demo_cost)
 
     sub.add_parser("drift").set_defaults(func=cmd_drift)
     sub.add_parser("demo-trace").set_defaults(func=cmd_demo_trace)

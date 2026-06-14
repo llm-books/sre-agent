@@ -47,6 +47,13 @@ traces. Drift detection watches two families: the agent's own behavior, and the
 environment's telemetry, the signals with no threshold alert, which is how the
 silent notifications failure gets caught.
 
+**ch10** adds **cost engineering** (`sre_agent/cost.py`). It models the per-incident
+token cost (dominated by the context that grows as evidence accumulates), then
+shrinks it with the chapter's three levers: prompt caching of the stable prefix,
+routing routine steps to a cheap model while only the diagnosis uses the capable
+one, and a per-incident token budget the orchestrator enforces, wrapping up
+gracefully when it's reached rather than spending through.
+
 ```
 agent/
   scope.yaml              the ch03 boundary as config (read at startup)
@@ -77,6 +84,7 @@ agent/
     observability/
       tracing.py          ch09: OpenTelemetry spans to Tempo, best-effort
       drift.py            ch09: two-family drift (agent behavior + environment signals)
+    cost.py               ch10: cost model, profiling, caching/routing, token budget
     cli.py                command line
   tests/
     test_resume.py        ch04: crash/resume + idempotency
@@ -87,6 +95,7 @@ agent/
     test_evals.py         ch07: case loading, judge validation, safety, smoke
     test_gate.py          ch08: gate decisions, noise band, rolling baseline, override
     test_observability.py ch09: tracing no-op safety, drift classification
+    test_cost.py          ch10: caching/routing savings, budget early-wrapup
 ```
 
 ## The six tools (ch06)
@@ -137,7 +146,8 @@ make agent-eval    # the ch07 eval harness (RUNS=N for multiple runs per scenari
 make agent-gate-demo # the ch08 deployment-gate showcase (baseline, block, override)
 make agent-trace     # the ch09 trace showcase (run an incident, confirm it reached Tempo)
 make agent-drift-demo # the ch09 drift showcase (silent failure caught by env drift)
-make agent-test    # the full suite (durability, memory, contract, eval, gate, obs tests)
+make agent-cost      # the ch10 cost showcase (caching, routing, token budget)
+make agent-test    # the full suite (durability, memory, contract, eval, gate, obs, cost)
 ```
 
 Or directly:
