@@ -98,6 +98,10 @@ agent-init: $(VENV) ## Create the agent database and schema
 agent-demo: $(VENV) ## Run the ch04 crash/resume showcase
 	cd agent && .venv/bin/python -m sre_agent demo-crash
 
+.PHONY: agent-memory
+agent-memory: $(VENV) ## Run the ch05 memory + conversation showcase (needs Redis)
+	cd agent && .venv/bin/python -m sre_agent demo-memory
+
 .PHONY: agent-run
 agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...
 	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE)

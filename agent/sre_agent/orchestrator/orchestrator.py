@@ -17,7 +17,10 @@ import re
 from psycopg.types.json import Json
 
 from .. import db, scope
+from ..conversation import ConversationStore
 from ..executor.executor import Executor
+from ..executor.tools import deploy_history
+from ..memory.store import MemoryStore
 from ..planner import Decision, Planner, default_planner
 from ..state import Incident, InvestigationState
 from . import engine
@@ -43,6 +46,8 @@ class Orchestrator:
         self.planner = planner or default_planner()
         self.executor = executor or Executor()
         self.scope = scope.load()
+        self.memory = MemoryStore()
+        self.conversation = ConversationStore()
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -95,6 +100,27 @@ class Orchestrator:
             state = self._replay_state(conn, workflow_id, incident)
             step_index = engine.next_index(conn, workflow_id)
 
+            # ch05: the service's current version (for judging staleness) and a
+            # recall of similar past incidents on this service from long-term
+            # memory. Memory enriches context; it never overrides current signals.
+            state.service_version = self._current_version(incident.service)
+            state.recalled = self.memory.recall(
+                incident.service, self._symptom_query(incident),
+                state.service_version, k=3)
+
+            # ch05: rebuild the engineer-facing conversation from the durable log.
+            # This is the derive-from-task-state discipline: on resume the
+            # narration is regenerated from what actually happened, so it can't
+            # drift from task state.
+            self.conversation.regenerate_from_steps(
+                workflow_id, engine.replay_steps(conn, workflow_id))
+            top = state.recalled[0] if state.recalled else None
+            if top and top.similarity >= 0.6 and not top.stale:
+                self.conversation.append(
+                    workflow_id, "agent",
+                    f"Seen a similar symptom on {incident.service} before "
+                    f"({top.occurred_at[:10]}); weighing it against current signals.")
+
             while not state.done:
                 if step_index % 2 == 0:
                     # DECIDE. The planner is only invoked for a NEW step; a recorded
@@ -104,21 +130,34 @@ class Orchestrator:
                         {"evidence_count": state.step_count},
                         compute=lambda c: self.planner.next_step(state).to_dict(),
                     )
+                    if not replayed:
+                        d = Decision.from_dict(result)
+                        what = d.tool or d.action
+                        self.conversation.append(workflow_id, "agent", f"Next: {what}. {d.reason}")
                     step_index += 1
                     self._maybe_crash(crash_after, step_index - 1, replayed)
                 else:
                     decision = Decision.from_dict(engine.get_step(conn, workflow_id, step_index - 1))
                     if decision.action == "conclude":
+                        # ch05: fold a relevant, non-stale recollection into the
+                        # hypothesis before recording it.
+                        hypothesis = self._augment_with_memory(decision.hypothesis, state)
                         result, replayed = engine.get_or_record_step(
                             conn, workflow_id, step_index, "action",
                             {"kind": "record_proposal"},
                             compute=lambda c: self.executor.record_proposal(
                                 c, workflow_id, step_index,
-                                decision.hypothesis, decision.remediation),
+                                hypothesis, decision.remediation),
                         )
-                        state.hypothesis = decision.hypothesis
-                        state.proposed_remediation = decision.remediation
+                        act = result.get("action", {})
+                        state.hypothesis = act.get("hypothesis")
+                        state.proposed_remediation = act.get("remediation")
                         self._finish(conn, workflow_id)
+                        # ch05: write this incident into long-term memory. Idempotent
+                        # per workflow, so replay or re-run does not duplicate it.
+                        self._remember(conn, workflow_id, state)
+                        self.conversation.append(
+                            workflow_id, "agent", f"Proposed: {state.proposed_remediation}")
                         state.done = True
                         step_index += 1
                     else:
@@ -128,6 +167,9 @@ class Orchestrator:
                             compute=lambda c: self.executor.run_tool(decision),
                         )
                         state.add_evidence(decision.tool, decision.reason, result.get("data"))
+                        if not replayed:
+                            self.conversation.append(
+                                workflow_id, "agent", f"Checked {decision.tool}.")
                         step_index += 1
                         self._maybe_crash(crash_after, step_index - 1, replayed)
             return state
@@ -148,6 +190,55 @@ class Orchestrator:
                 state.proposed_remediation = act.get("remediation")
                 state.done = True
         return state
+
+    # ---- ch05: memory helpers ----------------------------------------------
+
+    def _symptom_query(self, incident: Incident) -> str:
+        """The query symptom used to recall similar past incidents at the start,
+        before any cause is known: just the alert and the service."""
+        return f"{incident.alert} on {incident.service}"
+
+    def _current_version(self, service: str) -> str | None:
+        """The service's current version from the deploy ledger. A memory stored
+        under a different version is treated as potentially stale."""
+        dh = deploy_history(service)
+        deploys = dh.get("deploys") or []
+        if not deploys:
+            return None
+        latest = max(deploys, key=lambda d: d.get("ts", ""))
+        return latest.get("version")
+
+    def _augment_with_memory(self, base_hypothesis: str | None, state: InvestigationState) -> str:
+        base = base_hypothesis or ""
+        top = state.recalled[0] if state.recalled else None
+        if top and top.similarity >= 0.6 and not top.stale and top.root_cause:
+            return (
+                f"{base} Memory: a similar symptom on {state.incident.service} "
+                f"({top.occurred_at[:10]}) had root cause: {top.root_cause} "
+                f"This is context from the past, not a substitute for the current signals."
+            )
+        if top and top.stale:
+            return (
+                f"{base} (A past incident on this service looked similar, but it "
+                f"predates the current version, so it is treated as stale.)"
+            )
+        return base
+
+    def _remember(self, conn, workflow_id: str, state: InvestigationState) -> None:
+        # Store the OBSERVED symptom (what a future incident queries by), not the
+        # diagnosis. The diagnosis goes in root_cause. Keeping the symptom aligned
+        # with the recall query is what makes similarity search actually match.
+        symptom = self._symptom_query(state.incident)
+        self.memory.remember(
+            conn,
+            workflow_id=workflow_id,
+            service=state.incident.service,
+            symptom=symptom,
+            root_cause=state.hypothesis,
+            remediation=state.proposed_remediation,
+            service_version=state.service_version,
+        )
+        conn.commit()
 
     def _finish(self, conn, workflow_id: str) -> None:
         conn.execute(

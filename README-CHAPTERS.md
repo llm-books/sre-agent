@@ -71,3 +71,11 @@ Chapter 04 includes:
 - Pluggable planner: deterministic ScriptedPlanner (offline, no API key) and an optional Anthropic LLMPlanner whose decisions are recorded for replay
 - CLI (python -m sre_agent) with run / list / show / resume / demo-crash, plus Makefile targets (agent-setup, agent-init, agent-demo, agent-run, agent-test)
 - Verified: agent investigates the live env (orders latency 2.027s under the injected slow-query fault, correct "no recent deploy" diagnosis); demo-crash shows resume replays steps 0-3 and finishes with exactly one side-effect row; both durability tests pass.
+
+Chapter 05 includes:
+- The three kinds of state, made distinct. Task state stays in the durable log; conversation state moves to Redis; long-term memory becomes a vector store.
+- Conversation state (sre_agent/conversation.py): ephemeral in Redis, regenerated from the task-state log on every run, so it can never drift from what actually happened. Best-effort: a Redis outage degrades narration but never breaks the investigation.
+- Long-term memory (sre_agent/memory/): a vector store keyed by service and symptom. recall() filters by service then ranks by symptom similarity; one memory per incident (idempotent); each carries date + service_version for staleness. A LocalHashEmbedder keeps it offline; swap in a real embedder/vector DB for production.
+- Orchestrator now recalls similar past incidents at the start, folds a relevant non-stale recollection into its hypothesis (never overriding current signals), and remembers each incident on conclude.
+- New: demo-memory CLI + make agent-memory; recall and conversation inspection commands; memory table added to the schema; redis dependency.
+- Verified: demo-memory shows a second incident recalling the first at similarity 1.0, the hypothesis carrying a Memory clause, the conversation regenerated from task state, and a version change flipping the recollection to stale. Full suite 6/6 (2 ch04 + 4 ch05) passes.

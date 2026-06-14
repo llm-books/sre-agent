@@ -12,6 +12,7 @@ COPY deploys.jsonl ./deploys.jsonl
 ENV AGENT_DSN=postgresql://postgres:dev@postgres:5432/agent \
     AGENT_ADMIN_DSN=postgresql://postgres:dev@postgres:5432/postgres \
     PROM_URL=http://prometheus:9090 \
+    REDIS_URL=redis://redis:6379/0 \
     AGENT_SCOPE=/app/scope.yaml \
     DEPLOY_LEDGER=/app/deploys.jsonl
 ENTRYPOINT ["python", "-m", "sre_agent"]

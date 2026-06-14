@@ -134,6 +134,68 @@ def cmd_demo_crash(args):
     print(f"   side-effect rows still: {_action_count(wf)}  (expected still 1, no duplicate)")
 
 
+def cmd_recall(args):
+    orch = Orchestrator()
+    incident = Incident(alert=args.alert, service=args.service)
+    rec = orch.memory.recall(
+        args.service, orch._symptom_query(incident),
+        orch._current_version(args.service), k=args.k)
+    if not rec:
+        print(f"no memories for {args.service}")
+        return
+    for r in rec:
+        print(f"  sim={r.similarity} stale={r.stale} [{r.occurred_at[:10]} v={r.service_version}]")
+        print(f"      cause: {r.root_cause}")
+
+
+def cmd_conversation(args):
+    orch = Orchestrator()
+    turns = orch.conversation.history(args.id)
+    if not turns:
+        print("(no conversation; Redis may be down, or the workflow has not run)")
+    for t in turns:
+        print(f"  {t['role']}: {t['text']}")
+
+
+def cmd_demo_memory(args):
+    db.bootstrap()
+    orch = Orchestrator()
+    svc = args.service
+
+    print("1) First incident on", svc, "-> handled and remembered")
+    incA = Incident(alert="HighRequestLatency", service=svc)
+    wfA = make_workflow_id(incA, run=991)
+    orch.reset(wfA)
+    with db.connect() as conn:
+        conn.execute("DELETE FROM memory WHERE workflow_id IN (%s, %s)",
+                     (wfA, make_workflow_id(incA, run=992)))
+        conn.commit()
+    orch.start(incA, run=991)
+    stateA = orch.run(wfA)
+    print(f"   hypothesis: {stateA.hypothesis}")
+
+    print("\n2) A second, similar incident recalls the first")
+    incB = Incident(alert="HighRequestLatency", service=svc)
+    wfB = make_workflow_id(incB, run=992)
+    orch.reset(wfB)
+    orch.start(incB, run=992)
+    stateB = orch.run(wfB)
+    sim = stateB.recalled[0].similarity if stateB.recalled else "n/a"
+    print(f"   recalled {len(stateB.recalled)} past incident(s), top similarity {sim}")
+    print(f"   hypothesis now carries a Memory clause:\n   {stateB.hypothesis}")
+    print("   conversation thread (regenerated from task state + new turns):")
+    for t in orch.conversation.history(wfB):
+        print(f"     {t['role']}: {t['text']}")
+
+    print("\n3) After a version change, the same memory is treated as stale")
+    with db.connect() as conn:
+        conn.execute("UPDATE memory SET service_version = '0.0.1-old' WHERE workflow_id = %s", (wfA,))
+        conn.commit()
+    rec = orch.memory.recall(svc, orch._symptom_query(incB), orch._current_version(svc), k=3)
+    for r in rec:
+        print(f"     sim={r.similarity} stale={r.stale} (stored v={r.service_version}, current v={orch._current_version(svc)})")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="sre_agent", description="SRE agent (ch04)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -159,6 +221,20 @@ def main(argv=None):
     pd = sub.add_parser("demo-crash")
     pd.add_argument("--service", default="orders")
     pd.set_defaults(func=cmd_demo_crash)
+
+    prc = sub.add_parser("recall")
+    prc.add_argument("--service", default="orders")
+    prc.add_argument("--alert", default="HighRequestLatency")
+    prc.add_argument("--k", type=int, default=3)
+    prc.set_defaults(func=cmd_recall)
+
+    pc = sub.add_parser("conversation")
+    pc.add_argument("--id", required=True)
+    pc.set_defaults(func=cmd_conversation)
+
+    pdm = sub.add_parser("demo-memory")
+    pdm.add_argument("--service", default="orders")
+    pdm.set_defaults(func=cmd_demo_memory)
 
     args = p.parse_args(argv)
     args.func(args)

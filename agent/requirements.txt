@@ -5,3 +5,4 @@ PyYAML>=6.0
 # Install it (or `pip install anthropic`) and set ANTHROPIC_API_KEY to use it.
 # The scripted planner needs none of it and runs the durability demo offline.
 anthropic>=0.39 ; extra == "llm"
+redis>=5.0

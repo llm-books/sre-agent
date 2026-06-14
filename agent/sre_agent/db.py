@@ -53,6 +53,24 @@ CREATE TABLE IF NOT EXISTS actions (
     action          JSONB NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Long-term memory (ch05): a vector store of past incidents, keyed by service
+-- and symptom. One row per incident (workflow_id is unique) so re-running an
+-- investigation cannot duplicate its memory. The embedding is stored as a JSON
+-- array; similarity is computed in the store. occurred_at and service_version
+-- are the staleness metadata the agent weighs against current telemetry.
+CREATE TABLE IF NOT EXISTS memory (
+    id              BIGSERIAL PRIMARY KEY,
+    workflow_id     TEXT UNIQUE,
+    service         TEXT NOT NULL,
+    symptom         TEXT NOT NULL,
+    embedding       JSONB NOT NULL,
+    root_cause      TEXT,
+    remediation     TEXT,
+    service_version TEXT,
+    occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_memory_service ON memory (service);
 """
 
 

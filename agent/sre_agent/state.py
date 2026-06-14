@@ -35,6 +35,10 @@ class InvestigationState:
     hypothesis: str | None = None
     proposed_remediation: str | None = None
     done: bool = False
+    # ch05: relevant past incidents recalled from long-term memory, and the
+    # service's current version, used to judge whether a recollection is stale.
+    recalled: list[Any] = field(default_factory=list)
+    service_version: str | None = None
 
     def add_evidence(self, kind: str, summary: str, data: Any = None) -> None:
         self.evidence.append({"kind": kind, "summary": summary, "data": data})

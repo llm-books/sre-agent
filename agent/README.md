@@ -4,33 +4,59 @@ The SRE agent. It grows one component per chapter; see `../README-CHAPTERS.md`
 for the checkpoint map. The synthetic environment in `../env/` is fixed; only
 this directory and `../evals/` change across chapters.
 
-## At the ch04 checkpoint
+## Checkpoints so far
 
-The agent now has its control-flow spine: a **durable orchestrator** and an
+**ch04** gave the agent its control-flow spine: a **durable orchestrator** and an
 **executor**, split so the orchestrator decides and records while the executor
-touches the world. The agent can pick up an alert, run a checkpointed multi-step
-investigation against the live environment, survive a worker crash, and resume
-without re-running completed steps or duplicating its side effect.
+touches the world. It can pick up an alert, run a checkpointed investigation,
+survive a worker crash, and resume without re-running completed steps or
+duplicating its side effect.
+
+**ch05** adds the three kinds of state. Task state already lived in the durable
+log; now there is also **conversation state** in Redis (ephemeral, regenerated
+from task state so it can never drift) and **long-term memory** in a vector store
+keyed by service and symptom, with a staleness policy.
 
 ```
 agent/
   scope.yaml              the ch03 boundary as config (read at startup)
   requirements.txt
   sre_agent/
-    db.py                 Postgres connection + the durable-log schema
+    db.py                 Postgres connection + the durable-log + memory schema
     scope.py              loads and enforces scope.yaml
     state.py              the in-memory investigation state (rebuilt from the log)
     planner.py            ScriptedPlanner (offline) + optional LLMPlanner (Anthropic)
+    conversation.py       ch05: conversation state in Redis, regenerable from task state
+    memory/
+      embeddings.py       ch05: LocalHashEmbedder (offline) behind an Embedder interface
+      store.py            ch05: the vector store; recall by service + symptom, staleness
     orchestrator/
       engine.py           the durable engine: get_or_record_step (replay or run)
-      orchestrator.py     the investigation loop
+      orchestrator.py     the investigation loop (now recalls + remembers + narrates)
     executor/
       executor.py         runs steps; idempotency key on the side-effecting one
       tools.py            basic read-only tools (ch06 hardens these)
     cli.py                command line
   tests/
-    test_resume.py        crash/resume + idempotency
+    test_resume.py        ch04: crash/resume + idempotency
+    test_memory.py        ch05: recall, idempotent writes, staleness
+    test_conversation.py  ch05: regenerate-from-task-state survives eviction
 ```
+
+## The three kinds of state (ch05)
+
+| State | Where it lives | Source of truth? |
+|-------|----------------|------------------|
+| Task state (steps, hypothesis, actions) | Postgres durable log | Yes, authoritative |
+| Conversation (the engineer-facing thread) | Redis, ephemeral | No, regenerated from task state |
+| Long-term memory (past incidents) | Vector store (Postgres-backed here) | No, external reference |
+
+The discipline: task state is the only source of truth. The conversation is
+derived from it, so on recovery it is rebuilt rather than trusted, which is the
+defense against the drift failure. Long-term memory is an external reference,
+queried fresh, and it enriches context without ever overriding current signals.
+Every memory carries the date and service version it applied to; a memory from a
+different version is flagged stale.
 
 ## Run it
 
@@ -42,7 +68,8 @@ make up            # from the repo root: start the synthetic environment
 make agent-setup   # create the agent venv and install deps
 make agent-init    # create the agent database and schema
 make agent-demo    # the ch04 showcase: crash mid-run, then resume
-make agent-test    # the durability tests
+make agent-memory  # the ch05 showcase: recall a past incident, staleness, conversation
+make agent-test    # the durability + memory tests
 ```
 
 Or directly:
@@ -83,14 +110,15 @@ The tools in `executor/tools.py` are read-only and undefended on purpose. Chapte
 6 turns them into the real tool layer: schema validation, timeouts, retries,
 fallbacks, partial results, contract tests, and the allowlist on the one tool
 that can change the world. Remediations stay shadow-only until the chapter 12
-rollout work. State lives only in Postgres for now; chapter 5 adds the
-conversation and long-term-memory tiers.
+rollout work. The memory embedder is a deterministic local one so the demo runs
+offline; swap in a real embedding model and vector DB for production.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `AGENT_DSN` | `postgresql://postgres:dev@localhost:5432/agent` | the durable log |
+| `AGENT_DSN` | `postgresql://postgres:dev@localhost:5432/agent` | the durable log + memory |
+| `REDIS_URL` | `redis://localhost:6379/0` | conversation state (best-effort) |
 | `PROM_URL` | `http://localhost:9090` | Prometheus for tool queries |
 | `AGENT_PLANNER` | `scripted` | set to `llm` for the Anthropic planner |
 | `AGENT_SCOPE` | `agent/scope.yaml` | scope config path |
