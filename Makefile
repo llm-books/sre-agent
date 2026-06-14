@@ -81,6 +81,7 @@ VENV = agent/.venv
 PY   = $(VENV)/bin/python
 ALERT   ?= HighRequestLatency
 SERVICE ?= orders
+RUNS    ?= 1
 
 $(VENV): ## Create the agent venv and install dependencies
 	python3 -m venv $(VENV)
@@ -105,6 +106,10 @@ agent-memory: $(VENV) ## Run the ch05 memory + conversation showcase (needs Redi
 .PHONY: agent-tools
 agent-tools: $(VENV) ## Run the ch06 defensive tool-layer showcase
 	cd agent && .venv/bin/python -m sre_agent demo-tools
+
+.PHONY: agent-eval
+agent-eval: $(VENV) ## Run the ch07 eval harness against the scenarios
+	cd agent && .venv/bin/python -m sre_agent eval --runs $(RUNS)
 
 .PHONY: agent-run
 agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...

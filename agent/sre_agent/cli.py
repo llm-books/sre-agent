@@ -234,6 +234,12 @@ def cmd_demo_tools(args):
         print(f"  {label:28} -> {outcome}")
 
 
+def cmd_eval(args):
+    from .evals.harness import format_report, run_evals
+    report = run_evals(runs=args.runs)
+    print(format_report(report))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="sre_agent", description="SRE agent (ch04)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -275,6 +281,10 @@ def main(argv=None):
     pdm.set_defaults(func=cmd_demo_memory)
 
     sub.add_parser("demo-tools").set_defaults(func=cmd_demo_tools)
+
+    pe = sub.add_parser("eval")
+    pe.add_argument("--runs", type=int, default=1)
+    pe.set_defaults(func=cmd_eval)
 
     args = p.parse_args(argv)
     args.func(args)

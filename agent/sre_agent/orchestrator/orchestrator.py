@@ -42,12 +42,16 @@ def make_workflow_id(incident: Incident, run: int = 1) -> str:
 
 
 class Orchestrator:
-    def __init__(self, planner: Planner | None = None, executor: Executor | None = None):
+    def __init__(self, planner: Planner | None = None, executor: Executor | None = None,
+                 use_memory: bool = True):
         self.planner = planner or default_planner()
         self.executor = executor or Executor()
         self.scope = scope.load()
         self.memory = MemoryStore()
         self.conversation = ConversationStore()
+        # Evals run with memory off so each run is independent: recalling an
+        # earlier eval run of the same scenario would make the runs non-i.i.d.
+        self.use_memory = use_memory
 
     # ---- lifecycle ----------------------------------------------------------
 
@@ -104,9 +108,10 @@ class Orchestrator:
             # recall of similar past incidents on this service from long-term
             # memory. Memory enriches context; it never overrides current signals.
             state.service_version = self._current_version(incident.service)
-            state.recalled = self.memory.recall(
-                incident.service, self._symptom_query(incident),
-                state.service_version, k=3)
+            if self.use_memory:
+                state.recalled = self.memory.recall(
+                    incident.service, self._symptom_query(incident),
+                    state.service_version, k=3)
 
             # ch05: rebuild the engineer-facing conversation from the durable log.
             # This is the derive-from-task-state discipline: on resume the
@@ -155,7 +160,8 @@ class Orchestrator:
                         self._finish(conn, workflow_id)
                         # ch05: write this incident into long-term memory. Idempotent
                         # per workflow, so replay or re-run does not duplicate it.
-                        self._remember(conn, workflow_id, state)
+                        if self.use_memory:
+                            self._remember(conn, workflow_id, state)
                         self.conversation.append(
                             workflow_id, "agent", f"Proposed: {state.proposed_remediation}")
                         state.done = True

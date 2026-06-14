@@ -24,6 +24,13 @@ before reading, and returns an honest result (ok / degraded / partial / failure)
 instead of throwing or returning garbage. `scoped_kubectl` enforces its allowlist
 and the forbidden actions in the tool itself. Both flavors of contract test ship.
 
+**ch07** adds the **eval harness** (`sre_agent/evals/`). It scores the agent
+against the scenarios on three separate dimensions, outcome correctness (a
+validated judge), safety (deterministic), and efficiency (steps), at both the
+trajectory and step level. The judge is validated against human labels before its
+numbers are trusted. The scenarios the agent fails become the cases that gate
+deploys in ch08.
+
 ```
 agent/
   scope.yaml              the ch03 boundary as config (read at startup)
@@ -46,6 +53,10 @@ agent/
       schemas.py          ch06: response-shape schemas (validate before reading)
       wrapper.py          ch06: defensive_call + failure classification + gather
       tools.py            ch06: the six tools, each behind the wrapper
+    evals/
+      cases.py            ch07: eval cases loaded from the chaos scenarios
+      judge.py            ch07: EmbeddingJudge (offline) + validation, optional LLMJudge
+      harness.py          ch07: trajectory + step scoring across 3 dimensions
     cli.py                command line
   tests/
     test_resume.py        ch04: crash/resume + idempotency
@@ -53,6 +64,7 @@ agent/
     test_conversation.py  ch05: regenerate-from-task-state survives eviction
     test_tools_contract.py ch06: fake-backend contract tests (every commit)
     test_tools_real.py    ch06: real-upstream contract tests (catch drift)
+    test_evals.py         ch07: case loading, judge validation, safety, smoke
 ```
 
 ## The six tools (ch06)
@@ -99,7 +111,8 @@ make agent-init    # create the agent database and schema
 make agent-demo    # the ch04 showcase: crash mid-run, then resume
 make agent-memory  # the ch05 showcase: recall a past incident, staleness, conversation
 make agent-tools   # the ch06 showcase: the six tools + allowlist enforcement
-make agent-test    # the full suite (durability, memory, contract tests)
+make agent-eval    # the ch07 eval harness (RUNS=N for multiple runs per scenario)
+make agent-test    # the full suite (durability, memory, contract, eval tests)
 ```
 
 Or directly:

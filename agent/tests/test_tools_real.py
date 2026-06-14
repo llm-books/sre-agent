@@ -13,18 +13,26 @@ from __future__ import annotations
 import pytest
 import requests
 
-from sre_agent.executor.tools import PROM_URL, deploy_history, log_search, promql_query, runbook_search
+from sre_agent.executor.tools import (
+    LOKI_URL,
+    PROM_URL,
+    deploy_history,
+    log_search,
+    promql_query,
+    runbook_search,
+)
 
 
-def _env_up() -> bool:
+def _reachable(url: str) -> bool:
     try:
-        requests.get(f"{PROM_URL}/-/ready", timeout=2)
+        requests.get(url, timeout=2)
         return True
     except Exception:
         return False
 
 
-pytestmark = pytest.mark.skipif(not _env_up(), reason="synthetic environment not reachable")
+pytestmark = pytest.mark.skipif(
+    not _reachable(f"{PROM_URL}/-/ready"), reason="synthetic environment not reachable")
 
 
 def test_promql_real_shape():
@@ -34,6 +42,8 @@ def test_promql_real_shape():
 
 
 def test_log_search_real_shape():
+    if not _reachable(f"{LOKI_URL}/ready"):
+        pytest.skip("Loki not reachable")
     # Valid shape even if zero streams match in the window.
     res = log_search({"service": "orders"})
     assert res.ok

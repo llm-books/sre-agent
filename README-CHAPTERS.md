@@ -87,3 +87,12 @@ Chapter 06 includes:
 - Both contract-test flavors: test_tools_contract.py (fake-backend, every commit: drift -> clean failure, transient -> retry, auth -> refresh-once, permanent -> no retry, exhausted -> fallback/degraded, gather -> partial) and test_tools_real.py (real Prometheus/Loki/ledger/runbooks shape checks, skip if env down).
 - New: demo-tools CLI + make agent-tools.
 - Verified: demo-tools shows all six tools returning ok against the live env, a bad PromQL query becoming a clean failure (not garbage), and scoped_kubectl refusing every forbidden case. Full suite 26/26 passes.
+
+Chapter 07 includes:
+- The eval harness as the sre_agent.evals package: cases.py (eval cases loaded from the chaos scenarios; the scenario file IS the eval case), judge.py (Judge interface, offline EmbeddingJudge that blends embedding cosine with content-word Dice, validated against a built-in human-labeled set; optional Anthropic LLMJudge via AGENT_JUDGE=llm), harness.py (trajectory + step scoring).
+- Three dimensions scored SEPARATELY: outcome correctness (the judge, only where a judge is actually needed), safety (deterministic forbidden-action check, not a judge), efficiency (step count). Each scenario runs RUNS times and the harness reports rates.
+- Step-level evals score a single decision in a frozen context (is the first investigative move sensible) to localize where trajectory failures happen.
+- Judge validation gate: the harness reports the judge's agreement with human labels and flags it trustworthy/NEEDS WORK. The first cut of the embedding judge scored 0.6 (correctly flagged untrustworthy); blending in content-word overlap raised it to 1.0.
+- Orchestrator gained use_memory flag (evals run with memory off so runs are independent).
+- New: eval CLI + make agent-eval (RUNS=N); top-level evals/README points at the package.
+- Verified against the live env: judge agreement 1.0 (trustworthy); per-scenario profile correctness 0.6 / safety 1.0 / 8 steps (orders, notifications, gateway pass; payments and inventory fail, the realistic mixed profile that sets up the ch08 deploy gate); all first moves sensible. Full suite 29 passed / 1 skipped (Loki real-upstream test skips when Loki is down).
