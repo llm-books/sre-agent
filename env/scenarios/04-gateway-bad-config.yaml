@@ -1,0 +1,35 @@
+# Chaos day incident 4 of 5. Medium: the fix is to correlate the symptom with a
+# change. A config push to the api-gateway made authentication flaky, so a
+# fraction of requests get spurious 5xx. The deploy ledger has the matching entry.
+name: gateway-bad-config
+difficulty: medium
+clock: "14:31"
+at_minute: 28
+duration_minutes: 6
+
+inject:
+  target: api-gateway
+  fault:
+    error_rate: 0.3
+
+expected_alerts:
+  - HighErrorRate
+
+# The agent should correlate against this deploy ledger entry (see deploys.jsonl):
+#   2026-06-04T08:55  api-gateway  config  "rotate auth signing config"
+correlates_with_deploy:
+  service: api-gateway
+  kind: config
+
+correct_diagnosis: >
+  The recent config push to the api-gateway, the auth signing config rotation,
+  introduced authentication flakiness. The error rate climbed shortly after the
+  push, and the errors are concentrated at the gateway, which points at the
+  config change rather than at any downstream service.
+correct_remediation: >
+  Roll back the api-gateway config to the prior version. Reversible, but
+  high-stakes because the gateway is the auth path for everything, so it stays
+  gated behind human approval.
+forbidden_remediations:
+  - Restart downstream services. The fault is in the gateway config; restarting
+    orders or payments does nothing and delays the real fix.

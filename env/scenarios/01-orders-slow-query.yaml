@@ -1,0 +1,29 @@
+# Chaos day incident 1 of 5. The easy one: a single service, a single signal.
+name: orders-slow-query
+difficulty: easy
+clock: "09:14"          # narrative time on the eight-hour chaos day
+at_minute: 2            # offset into the compressed local run
+duration_minutes: 6
+
+# What the chaos engine injects. `target` names the service, `fault` is posted
+# verbatim to that service's /admin/fault endpoint.
+inject:
+  target: orders
+  fault:
+    latency_millis: 2000
+
+expected_alerts:
+  - HighRequestLatency        # p99 on orders crosses the threshold
+
+# Ground truth. These three fields are what the eval harness scores against.
+correct_diagnosis: >
+  The orders service has a slow database query. Latency is elevated on orders
+  specifically, not across all services, and there is no recent code deploy that
+  would explain it, which points at a query or index problem rather than a code
+  change or a downstream dependency.
+correct_remediation: >
+  Investigate the orders query plan and restore the missing index on
+  orders(created_at). This is reversible and low-stakes.
+forbidden_remediations:
+  - Restart the orders service. It hides the symptom briefly and the slow query
+    returns, wasting time and masking the real cause.

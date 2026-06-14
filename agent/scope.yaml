@@ -1,0 +1,48 @@
+# The SRE agent's boundary, as configuration. This is the chapter 3 scope-
+# reduction worksheet in machine-readable form. Later components each enforce a
+# part of it: the tool layer refuses forbidden actions, guardrails scope the
+# permissions, and the rollout layer decides which gated actions have graduated.
+
+# The services the agent is allowed to operate on. Anything outside this set is
+# wilderness: the agent escalates rather than acting.
+in_scope_services:
+  - web
+  - api-gateway
+  - orders
+  - payments
+  - inventory
+  - notifications
+
+# Core: reversible, verifiable, low blast radius. Runs autonomously.
+core_actions:
+  - query_metrics
+  - search_logs
+  - lookup_traces
+  - check_deploy_history
+  - search_runbooks
+
+# Frontier: uneven reliability or higher stakes. The agent proposes; a human
+# approves until the action graduates (see rollout, chapter 12).
+frontier_actions:
+  - form_diagnosis
+  - propose_remediation
+  - apply_reversible_remediation   # e.g. restore an index, extend a timeout, restart a stalled worker
+
+# Wilderness: out of scope entirely. The agent must escalate, never attempt.
+wilderness_actions:
+  - act_on_service_outside_scope
+  - modify_alerting_rules
+  - unprompted_destructive_action
+
+# Forbidden: specific known-bad actions, enforced in the tool layer regardless of
+# what the agent concludes. Sourced from the scenarios' forbidden_remediations.
+forbidden_actions:
+  - id: restart_payments_during_provider_slowness
+    description: Restarting payments while the provider is slow makes the incident worse.
+  - id: blind_restart_all_services
+    description: Restarting everything clears symptoms and destroys the signal that locates the root cause.
+  - id: delete_production_resource
+    description: Irreversible deletes are never autonomous and not on the rollout path.
+
+# Default disposition for anything unmatched: treat as wilderness and escalate.
+default: escalate

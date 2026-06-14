@@ -1,0 +1,6 @@
+{"ts":"2026-06-01T09:00:00Z","service":"orders","version":"1.4.2","change":"add index on orders(created_at)","author":"sara","kind":"code"}
+{"ts":"2026-06-01T14:30:00Z","service":"payments","version":"2.1.0","change":"bump provider client timeout to 3s","author":"deng","kind":"config"}
+{"ts":"2026-06-02T11:15:00Z","service":"inventory","version":"3.0.1","change":"enable redis cache for stock lookups","author":"mira","kind":"code"}
+{"ts":"2026-06-03T10:05:00Z","service":"web","version":"0.9.7","change":"new checkout page copy","author":"sara","kind":"code"}
+{"ts":"2026-06-03T16:40:00Z","service":"notifications","version":"1.2.0","change":"switch email worker to batch mode","author":"deng","kind":"code"}
+{"ts":"2026-06-04T08:55:00Z","service":"api-gateway","version":"4.3.3","change":"rotate auth signing config","author":"mira","kind":"config"}

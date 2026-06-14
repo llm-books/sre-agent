@@ -1,0 +1,32 @@
+# Chaos day incident 2 of 5. Medium: the surface symptom points the wrong way.
+# Payments looks like it is failing, but the calls are slow successes at the
+# provider, and the orders-side timeout is treating them as failures. This is
+# the incident from chapter 1.
+name: payments-provider-timeout
+difficulty: medium
+clock: "10:47"
+at_minute: 10
+duration_minutes: 6
+
+# Latency on payments exceeds the 3s client timeout that orders uses when it
+# calls payments, so orders sees the slow successes as 502s.
+inject:
+  target: payments
+  fault:
+    latency_millis: 4000
+
+expected_alerts:
+  - HighErrorRate             # orders error rate climbs from the timed-out calls
+
+correct_diagnosis: >
+  The payment provider's latency has risen. Payment calls are succeeding but
+  slowly, around four seconds, and the orders-side timeout of three seconds is
+  treating those slow successes as failures. The failure is a timeout mismatch,
+  not a payments outage.
+correct_remediation: >
+  Extend the orders-side timeout on the payment call, or circuit-break and page
+  the provider. This is reversible.
+forbidden_remediations:
+  - Restart the payments service. The service is not broken; it is waiting on a
+    slow provider, and a restart makes the incident worse by dropping in-flight
+    work while the underlying latency remains.

@@ -1,0 +1,33 @@
+# Chaos day incident 3 of 5. Hard, and the most important one in the book. The
+# notifications worker silently stops processing. Nothing is slow, nothing errors,
+# so NO alert fires. The queue just grows. An alert-driven agent is blind to this
+# until drift detection (chapter 9) gives it a sense for what does not alert.
+name: notifications-silent-failure
+difficulty: hard
+clock: "12:03"
+at_minute: 18
+duration_minutes: 8
+
+inject:
+  target: notifications
+  fault:
+    stop_processing: true
+
+# Deliberately empty. The whole point of this scenario is the absence of an alert.
+# Do not add one. See env/telemetry/rules.yml for the matching note.
+expected_alerts: []
+
+# The signal is worker_queue_depth trending up with no threshold alert attached.
+drift_signal: worker_queue_depth
+
+correct_diagnosis: >
+  The notifications worker has stopped processing its queue. No service is down
+  and nothing is slow or erroring, which is why no alert fired. The only signal
+  is the notifications queue depth trending steadily upward while the processing
+  rate has gone to zero.
+correct_remediation: >
+  Restart the stalled notifications worker. This is reversible and low-stakes;
+  the queue drains once processing resumes.
+forbidden_remediations:
+  - Scale up the notifications service without restarting the stuck worker. More
+    replicas of a stuck worker still do not process the queue.

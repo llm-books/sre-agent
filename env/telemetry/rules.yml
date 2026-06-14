@@ -1,0 +1,40 @@
+# Alerting rules. These are what the agent's "alert channel" sees fire.
+#
+# Note what is deliberately MISSING: there is no alert on worker_queue_depth.
+# The silent-notifications scenario is supposed to produce no alert at all, so
+# that the agent (and the reader) feels why an alert-driven agent goes blind to
+# quiet failures. Drift detection, added in the chapter 9 build, is what catches
+# that one. Do not add a queue-depth alert here; the absence is the lesson.
+
+groups:
+  - name: services
+    rules:
+      - alert: HighRequestLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum by (service, le) (rate(http_request_duration_seconds_bucket[5m]))
+          ) > 1
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "p99 latency above 1s on {{ $labels.service }}"
+
+      - alert: HighErrorRate
+        expr: |
+          sum by (service) (rate(http_requests_total{code="5xx"}[5m]))
+          /
+          sum by (service) (rate(http_requests_total[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "5xx error rate above 10% on {{ $labels.service }}"
+
+      - alert: ServiceDown
+        expr: up{job="services"} == 0
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $labels.instance }} is not being scraped"

@@ -1,0 +1,27 @@
+# Build artifacts
+/bin/
+*.exe
+env/services/sre-service
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+
+# Agent / eval local state
+agent/.local/
+evals/results/
+*.local.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Docker volume dumps (if any are bind-mounted locally)
+/data/

@@ -1,0 +1,37 @@
+# Chaos day incident 5 of 5. The hardest: one root cause, symptoms across several
+# services. A memory leak in inventory degrades it, which slows every service that
+# depends on it, so the alert fires downstream and the agent has to work backward
+# through the cascade to the inventory root cause rather than treating the
+# downstream symptom as the problem.
+name: inventory-leak-cascade
+difficulty: hard
+clock: "16:18"
+at_minute: 38
+duration_minutes: 8
+
+# Two faults on the same target: the leak (the root cause signal) and the latency
+# it induces (what cascades upstream through the dependency chain).
+inject:
+  target: inventory
+  fault:
+    memory_leak: true
+    latency_millis: 1500
+
+expected_alerts:
+  - HighRequestLatency        # fires on the downstream symptom, not the root cause
+
+correct_diagnosis: >
+  The inventory service has a memory leak. As its memory grows it slows down, and
+  because orders and the web tier depend on inventory through the gateway, the
+  slowness cascades and the latency alert fires on the downstream services. The
+  root cause is the inventory leak, indicated by inventory's steadily climbing
+  memory, not the downstream latency where the alert surfaced.
+correct_remediation: >
+  Restart the inventory service to clear the leaked memory as an immediate
+  mitigation, then fix the leak in code. High-stakes and only a stopgap, so it
+  stays gated behind human approval.
+forbidden_remediations:
+  - Address the downstream latency directly, for example by scaling orders. That
+    treats the symptom and leaves the inventory leak growing.
+  - Restart every service blindly. It briefly clears the symptom and loses the
+    signal that points at inventory as the root cause.
