@@ -1,7 +1,13 @@
 # sre-agent
 
-The companion repository for *Production AI Agents: Building Systems That Survive
-Real Users*. It is two things:
+<p align="center">
+  <a href="https://www.llm-books.com/production-ai-agents">
+    <img src="assets/Production-AI-Agents-Front-Cover.webp" alt="Production AI Agents — Front Cover" width="320">
+  </a>
+</p>
+
+The companion repository for [*Production AI Agents: Building Systems That Survive
+Real Users*](https://www.llm-books.com/production-ai-agents). It is two things:
 
 1. A **synthetic production environment** you can run on a laptop: six
    microservices modeling an e-commerce checkout, a full telemetry stack, a load
