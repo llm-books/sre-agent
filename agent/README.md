@@ -6,7 +6,7 @@ this directory and `../evals/` change across chapters.
 
 ## Checkpoints so far
 
-**ch04** gave the agent its control-flow spine: a **durable orchestrator** and an
+**ch04** gave the agent its control-flow mechanism: a **durable orchestrator** and an
 **executor**, split so the orchestrator decides and records while the executor
 touches the world. It can pick up an alert, run a checkpointed investigation,
 survive a worker crash, and resume without re-running completed steps or
@@ -70,6 +70,13 @@ Graduation is grounded in the eval track record. The reference agent now resolve
 the silent notifications failure end to end, autonomously restarting the stalled
 worker, while high-stakes actions still escalate to a human.
 
+**ch13** asks **when multi-agent earns its cost** (`sre_agent/multiagent/`). It
+adds the strongest second-agent case, a verifier, and *measures* whether it pays
+off using the eval harness. The finding is the chapter's: the verifier earns its
+cost only when targeted at the hard incidents where the primary is weak, not run
+everywhere. Multi-agent is an empirical question, and the default stays one
+well-built agent.
+
 ```
 agent/
   scope.yaml              the ch03 boundary as config (read at startup)
@@ -110,6 +117,9 @@ agent/
       config.py           ch12: load the rollout matrix (rollout.yaml)
       graduation.py       ch12: recommend a mode from the eval track record + stakes
       approval.py         ch12: the approval surface (assisted mode)
+    multiagent/
+      verifier.py         ch13: a verifier agent (adversarial independent review)
+      experiment.py       ch13: measure whether the verifier earns its cost
     cli.py                command line
   tests/
     test_resume.py        ch04: crash/resume + idempotency
@@ -123,6 +133,7 @@ agent/
     test_cost.py          ch10: caching/routing savings, budget early-wrapup
     test_guardrails.py    ch11: input scan, permission scoping, output guard, injection survival
     test_rollout.py       ch12: matrix loads, graduation logic, dispatch by mode
+    test_multiagent.py    ch13: verifier flagging, targeted-vs-everywhere cost
 ```
 
 ## The six tools (ch06)
@@ -176,7 +187,8 @@ make agent-drift-demo # the ch09 drift showcase (silent failure caught by env dr
 make agent-cost      # the ch10 cost showcase (caching, routing, token budget)
 make agent-security  # the ch11 security showcase (hostile log, guardrails, injection survival)
 make agent-rollout   # the ch12 rollout showcase (per-action modes + autonomous silent-failure fix)
-make agent-test    # the full suite (durability ... security, rollout)
+make agent-multiagent # the ch13 experiment (does a verifier agent earn its cost?)
+make agent-test    # the full suite (61 tests across ch04-ch13)
 ```
 
 Or directly:

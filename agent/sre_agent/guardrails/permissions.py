@@ -1,6 +1,6 @@
 """Permission scoping: the deterministic layer that bounds the blast radius.
 
-The agent is a constrained principal, not the user. It holds a read-only
+The agent is a constrained actor, not the user. It holds a read-only
 telemetry credential. Read tools run autonomously; anything that would change the
 world requires an approval token threaded in from a human. Enforced HERE, at the
 credential boundary, regardless of what the agent (or an injection) concludes,

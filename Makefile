@@ -147,6 +147,10 @@ agent-rollout: $(VENV) ## Run the ch12 rollout showcase (per-action modes + auto
 agent-graduate: $(VENV) ## Show eval-grounded graduation recommendations vs the configured modes
 	cd agent && .venv/bin/python -m sre_agent graduate
 
+.PHONY: agent-multiagent
+agent-multiagent: $(VENV) ## Run the ch13 experiment: does a verifier agent earn its cost?
+	cd agent && .venv/bin/python -m sre_agent demo-multiagent
+
 .PHONY: agent-run
 agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...
 	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE)

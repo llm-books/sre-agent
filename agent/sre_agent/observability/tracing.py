@@ -1,6 +1,6 @@
 """Agent tracing, to Tempo over OTLP/HTTP.
 
-Every incident run becomes a root span; each step a child span; each model
+Every incident run becomes a root span, each step a child span, each model
 decision and tool call its own span carrying the content that makes it
 reconstructable. The discipline is what goes ON the span, not the instrumentation:
 the full prompt and completion, not summaries, and the agent's hypothesis as a

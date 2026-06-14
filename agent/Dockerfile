@@ -1,4 +1,4 @@
-# Optional: run the agent as a container on the compose network instead of from a
+# Optional: run the agent as a container on the compose network instead of a
 # local venv. Build context is the repo root so the agent can see scope.yaml and
 # the deploy ledger. Run with the AGENT_DSN and PROM_URL pointing at the compose
 # service names (postgres:5432, prometheus:9090).

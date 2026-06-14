@@ -19,8 +19,8 @@ from sre_agent.executor.wrapper import (
 from sre_agent.executor.results import ToolResult
 
 NO_SLEEP = lambda _: None
-GOOD = {"data": {"result": []}}        # valid promql shape
-DRIFTED = {"data": {}}                  # 'result' renamed/removed: schema drift
+GOOD = {"data": {"result": []}} # valid promql shape
+DRIFTED = {"data": {}} # 'result' renamed/removed: schema drift
 
 
 def test_valid_response_is_ok():

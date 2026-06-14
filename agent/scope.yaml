@@ -1,5 +1,5 @@
-# The SRE agent's boundary, as configuration. This is the chapter 3 scope-
-# reduction worksheet in machine-readable form. Later components each enforce a
+# The SRE agent's boundary, as configuration. This is the chapter 3 scope
+# reduction worksheet in machine readable form. Later components each enforce a
 # part of it: the tool layer refuses forbidden actions, guardrails scope the
 # permissions, and the rollout layer decides which gated actions have graduated.
 

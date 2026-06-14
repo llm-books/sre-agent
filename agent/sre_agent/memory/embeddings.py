@@ -3,7 +3,7 @@
 The default `LocalHashEmbedder` is deterministic and needs no API key, so the
 memory demo runs offline just like the scripted planner. It hashes tokens into a
 fixed-dimension vector and L2-normalizes, so symptom texts that share words land
-near each other under cosine similarity. It is not a semantic model; it is enough
+near each other under cosine similarity. It is not a semantic model, it is enough
 to demonstrate similarity search.
 
 For a real deployment, swap in a proper embedding model (OpenAI, Voyage, a local

@@ -378,6 +378,12 @@ def cmd_graduate(args):
               f"-> recommend {rec:11} (configured {r.mode}){flag}")
 
 
+def cmd_demo_multiagent(args):
+    from .multiagent.experiment import compare, format_compare
+    results, policies = compare()
+    print(format_compare(results, policies))
+
+
 def cmd_threat_model(args):
     from .guardrails.threat_model import render
     print(render())
@@ -628,6 +634,7 @@ def main(argv=None):
 
     sub.add_parser("threat-model").set_defaults(func=cmd_threat_model)
     sub.add_parser("demo-security").set_defaults(func=cmd_demo_security)
+    sub.add_parser("demo-multiagent").set_defaults(func=cmd_demo_multiagent)
 
     sub.add_parser("drift").set_defaults(func=cmd_drift)
     sub.add_parser("demo-trace").set_defaults(func=cmd_demo_trace)

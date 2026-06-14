@@ -2,7 +2,7 @@
 
 It owns control flow and never touches the world directly. Each iteration is two
 recorded steps: a DECIDE step (the planner chooses the next move) and an ACT step
-(the executor runs a tool or records a proposal). Both are memoized on the durable
+(the executor runs a tool or records a proposal). Both are stored on the durable
 log via the engine, so a resumed workflow replays completed steps without
 re-running them and continues from the first unrecorded step.
 

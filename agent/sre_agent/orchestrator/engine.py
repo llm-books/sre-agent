@@ -2,7 +2,7 @@
 
 This is the few-hundred-line version the book describes: a workflow table, a
 step-results table, and the one primitive that makes execution durable,
-`get_or_record_step`. It memoizes each step on the durable log. If a step is
+`get_or_record_step`. It stores each step on the durable log. If a step is
 already recorded, its result is replayed without re-execution; otherwise it is
 computed, recorded, and committed. That single rule is what lets a crashed worker
 resume from where it died instead of restarting or leaving the world half-changed.
