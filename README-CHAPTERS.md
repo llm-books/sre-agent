@@ -63,3 +63,11 @@ Chapter 03 includes:
 - agent/scope.yaml: the chapter 3 boundary as configuration
 - Makefile, docker-compose, and getting-started + troubleshooting docs
 - Verified: ```make up``` brings up all services, chaos injection moves the metrics (orders p95 0.08s -> 2.02s on the slow-query fault).
+
+Chapter 04 includes:
+- Durable orchestrator + executor under agent/sre_agent/, split so the orchestrator decides and records while the executor touches the world
+- Homegrown durable engine: workflows + steps tables in a dedicated agent database, with get_or_record_step (replay a recorded step, or run it once and record it)
+- Idempotency keys (workflow_id:step_index) on the one state-changing step, with an actions dedup table; the chapter-4 double-charge defense made concrete
+- Pluggable planner: deterministic ScriptedPlanner (offline, no API key) and an optional Anthropic LLMPlanner whose decisions are recorded for replay
+- CLI (python -m sre_agent) with run / list / show / resume / demo-crash, plus Makefile targets (agent-setup, agent-init, agent-demo, agent-run, agent-test)
+- Verified: agent investigates the live env (orders latency 2.027s under the injected slow-query fault, correct "no recent deploy" diagnosis); demo-crash shows resume replays steps 0-3 and finishes with exactly one side-effect row; both durability tests pass.

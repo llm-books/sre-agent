@@ -72,3 +72,36 @@ chaos-clear-all: ## Clear all injected faults
 .PHONY: chaos-day
 chaos-day: ## Run the full five-incident chaos day (override SPEED=NN)
 	$(COMPOSE) run --rm chaos day --speed $(SPEED)
+
+# ---- agent (ch04+) --------------------------------------------------------
+# The agent runs from a local Python venv against the environment's exposed
+# ports. It needs the environment up (make up) for Postgres and Prometheus.
+
+VENV = agent/.venv
+PY   = $(VENV)/bin/python
+ALERT   ?= HighRequestLatency
+SERVICE ?= orders
+
+$(VENV): ## Create the agent venv and install dependencies
+	python3 -m venv $(VENV)
+	$(PY) -m pip install -q --upgrade pip
+	$(PY) -m pip install -q -r agent/requirements.txt pytest
+
+.PHONY: agent-setup
+agent-setup: $(VENV) ## Set up the agent's Python venv
+
+.PHONY: agent-init
+agent-init: $(VENV) ## Create the agent database and schema
+	cd agent && .venv/bin/python -m sre_agent init
+
+.PHONY: agent-demo
+agent-demo: $(VENV) ## Run the ch04 crash/resume showcase
+	cd agent && .venv/bin/python -m sre_agent demo-crash
+
+.PHONY: agent-run
+agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...
+	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE)
+
+.PHONY: agent-test
+agent-test: $(VENV) ## Run the agent's durability tests (needs the env up)
+	cd agent && PYTHONPATH=. .venv/bin/python -m pytest tests/ -v
