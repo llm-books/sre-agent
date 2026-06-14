@@ -54,6 +54,14 @@ routing routine steps to a cheap model while only the diagnosis uses the capable
 one, and a per-incident token budget the orchestrator enforces, wrapping up
 gracefully when it's reached rather than spending through.
 
+**ch11** adds **security and guardrails** (`sre_agent/guardrails/`). Defense in
+depth: input guardrails scan and redact injection in untrusted log content
+(probabilistic first layer), credential-level permission scoping blocks any write
+the agent isn't authorized for, and output guardrails reject destructive or
+exfiltrating actions before they take effect. The point is that injection is
+survivable: even if the input filter misses, the deterministic layers contain it,
+so the worst a compromised agent can do is propose a remediation a human rejects.
+
 ```
 agent/
   scope.yaml              the ch03 boundary as config (read at startup)
@@ -85,6 +93,11 @@ agent/
       tracing.py          ch09: OpenTelemetry spans to Tempo, best-effort
       drift.py            ch09: two-family drift (agent behavior + environment signals)
     cost.py               ch10: cost model, profiling, caching/routing, token budget
+    guardrails/
+      input_guards.py     ch11: scan/redact/mark untrusted content (injection)
+      permissions.py      ch11: credential-level permission scoping (read-only)
+      output_guards.py    ch11: reject destructive/exfiltrating actions
+      threat_model.py     ch11: the SRE agent's threat-model worksheet
     cli.py                command line
   tests/
     test_resume.py        ch04: crash/resume + idempotency
@@ -96,6 +109,7 @@ agent/
     test_gate.py          ch08: gate decisions, noise band, rolling baseline, override
     test_observability.py ch09: tracing no-op safety, drift classification
     test_cost.py          ch10: caching/routing savings, budget early-wrapup
+    test_guardrails.py    ch11: input scan, permission scoping, output guard, injection survival
 ```
 
 ## The six tools (ch06)
@@ -147,7 +161,8 @@ make agent-gate-demo # the ch08 deployment-gate showcase (baseline, block, overr
 make agent-trace     # the ch09 trace showcase (run an incident, confirm it reached Tempo)
 make agent-drift-demo # the ch09 drift showcase (silent failure caught by env drift)
 make agent-cost      # the ch10 cost showcase (caching, routing, token budget)
-make agent-test    # the full suite (durability, memory, contract, eval, gate, obs, cost)
+make agent-security  # the ch11 security showcase (hostile log, guardrails, injection survival)
+make agent-test    # the full suite (durability, memory, contract, eval, gate, obs, cost, security)
 ```
 
 Or directly:

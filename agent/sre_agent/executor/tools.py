@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import schemas
+from ..guardrails.input_guards import sanitize
 from .results import ToolResult
 from .wrapper import PermanentError, defensive_call, http_get_json
 
@@ -66,11 +67,24 @@ def log_search(args: dict) -> ToolResult:
         f"{LOKI_URL}/loki/api/v1/query_range",
         {"query": query, "start": start, "end": end, "limit": 20, "direction": "backward"}, t)
     res = defensive_call(op, schema=schemas.LOKI, timeout=10)
-    return res.map(lambda b: {
-        "query": query,
-        "streams": len(b["data"]["result"]),
-        "lines": sum(len(s.get("values", [])) for s in b["data"]["result"]),
-    })
+
+    def transform(b):
+        streams = b["data"]["result"]
+        # Sample a few log lines and run them through the input guardrails: log
+        # content is untrusted (customer-controlled fields land here), so it is
+        # scanned for injection, redacted, and marked as data before the agent
+        # ever reasons over it.
+        raw = [line for s in streams[:3] for _, line in s.get("values", [])[:2]]
+        scrubbed = [sanitize(line) for line in raw]
+        return {
+            "query": query,
+            "streams": len(streams),
+            "lines": sum(len(s.get("values", [])) for s in streams),
+            "samples": [g.marked for g in scrubbed],
+            "injection_flags": sorted({f for g in scrubbed for f in g.flags}),
+        }
+
+    return res.map(transform)
 
 
 # ---- trace_lookup ---------------------------------------------------------

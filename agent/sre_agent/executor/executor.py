@@ -13,6 +13,7 @@ second write is a no-op.
 from __future__ import annotations
 
 from .. import db
+from ..guardrails import permissions
 from ..planner import Decision
 from .results import ToolResult
 from .tools import TOOLS
@@ -36,6 +37,13 @@ class Executor:
         if tool not in TOOLS:
             return {"ok": False, "tool": tool, "status": "failure",
                     "data": None, "reason": f"unknown tool: {tool}", "missing": []}
+        # ch11: credential-level permission scoping, before the tool runs. A write
+        # the agent isn't authorized for is denied here regardless of the tool's
+        # own checks (defense in depth) and regardless of what an injection wants.
+        allowed, why = permissions.check(tool, decision.args)
+        if not allowed:
+            return {"ok": False, "tool": tool, "status": "failure",
+                    "data": None, "reason": f"permission denied: {why}", "missing": []}
         try:
             res = TOOLS[tool](decision.args)
         except Exception as e:

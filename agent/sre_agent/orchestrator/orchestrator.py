@@ -20,6 +20,7 @@ from .. import cost, db, scope
 from ..conversation import ConversationStore
 from ..executor.executor import Executor
 from ..executor.tools import fetch_deploys
+from ..guardrails import output_guards
 from ..memory.store import MemoryStore
 from ..observability import tracing
 from ..planner import Decision, Planner, default_planner
@@ -163,12 +164,21 @@ class Orchestrator:
                             with tracing.span("action.record_proposal") as sp:
                                 tracing.set_attr(sp, "step.index", step_index)
                                 hypothesis = self._augment_with_memory(decision.hypothesis, state)
+                                # ch11: output guardrail, the last check before an
+                                # intent becomes an effect. A destructive or
+                                # exfiltrating proposal is refused and escalated.
+                                remediation = decision.remediation
+                                ok, why = output_guards.validate_action(
+                                    {"hypothesis": hypothesis, "remediation": remediation})
+                                if not ok:
+                                    tracing.set_attr(sp, "guardrail.blocked", why)
+                                    remediation = (f"[blocked by output guardrail: {why}] "
+                                                   f"escalating to a human")
                                 result, replayed = engine.get_or_record_step(
                                     conn, workflow_id, step_index, "action",
                                     {"kind": "record_proposal"},
                                     compute=lambda c: self.executor.record_proposal(
-                                        c, workflow_id, step_index,
-                                        hypothesis, decision.remediation),
+                                        c, workflow_id, step_index, hypothesis, remediation),
                                 )
                                 act = result.get("action", {})
                                 state.hypothesis = act.get("hypothesis")
