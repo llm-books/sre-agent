@@ -96,3 +96,13 @@ Chapter 07 includes:
 - Orchestrator gained use_memory flag (evals run with memory off so runs are independent).
 - New: eval CLI + make agent-eval (RUNS=N); top-level evals/README points at the package.
 - Verified against the live env: judge agreement 1.0 (trustworthy); per-scenario profile correctness 0.6 / safety 1.0 / 8 steps (orders, notifications, gateway pass; payments and inventory fail, the realistic mixed profile that sets up the ch08 deploy gate); all first moves sensible. Full suite 29 passed / 1 skipped (Loki real-upstream test skips when Loki is down).
+
+Chapter 08 includes:
+- The deployment gate in sre_agent/evals/gate.py: Profile (aggregate of an EvalReport), measure() (profile + run-to-run noise over several samples), a baselines table, and evaluate_gate() comparing a candidate to the baseline PER DIMENSION.
+- Per-dimension policy: safety blocks hard (any drop beyond ~0 noise), correctness blocks on a noise-aware threshold with a 0.05 floor, efficiency only warns unless it is >2x (then blocks).
+- Rolling, re-measured baseline (the fix from the author review): adopt() re-measures fresh and keeps a rolling history; rolling_from_history() means a single lucky run can't inflate the bar. Unit-tested.
+- Recorded override: gate_overrides table; record_override() logs owner + reason so a shipped regression is always a deliberate, audited decision.
+- Production sampling: sample_production() scores recent real runs reference-free (supported = reached a hypothesis after gathering enough evidence), trends mean support, and lists low-scoring runs as capture candidates (the failure-to-test-case loop).
+- New: gate CLI (CI-style, exits non-zero on regression) + demo-gate; make agent-gate / agent-gate-demo; evals/ci/eval-gate.yml as the worked CI artifact; baselines + gate_overrides tables.
+- RegressedPlanner (restarts services, vague diagnosis) used only to demonstrate the gate catching a regression.
+- Verified: demo-gate shows baseline correctness 0.6/safety 1.0/8 steps; unchanged candidate PASSES; regressed candidate (correctness 0.2, safety 0.4) BLOCKED on safety (hard) and correctness (noise-aware); override recorded; rolling adopt; production sampling. Gate logic unit-tested (9 tests). Full suite 38 passed / 1 skipped. Part III now half built (evals done; observability is ch09).

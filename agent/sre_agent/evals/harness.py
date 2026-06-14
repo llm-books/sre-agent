@@ -132,11 +132,11 @@ def score_step(orch: Orchestrator, case: EvalCase) -> StepScore:
     return StepScore(case=case.name, first_tool=tool, acceptable=acceptable)
 
 
-def run_evals(runs: int = 1, judge: Judge | None = None) -> EvalReport:
+def run_evals(runs: int = 1, judge: Judge | None = None, planner=None) -> EvalReport:
     db.bootstrap()
     cases = load_cases()
     judge = judge or default_judge()
-    orch = Orchestrator(use_memory=False)
+    orch = Orchestrator(planner=planner, use_memory=False)
     report = EvalReport(judge_agreement=validate_judge(judge))
     for case in cases:
         report.trajectories.append(score_trajectory(orch, case, runs, judge))

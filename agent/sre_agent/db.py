@@ -71,6 +71,27 @@ CREATE TABLE IF NOT EXISTS memory (
     occurred_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_memory_service ON memory (service);
+
+-- Deployment gate (ch08). The baseline is the deployed agent's eval profile, kept
+-- as a rolling history so no single lucky measurement can inflate the bar. The
+-- override table records every deliberate ship-past-a-red-gate, with an owner and
+-- a reason, so a shipped regression is always a decision someone made on the record.
+CREATE TABLE IF NOT EXISTS baselines (
+    name        TEXT PRIMARY KEY,
+    profile     JSONB NOT NULL,            -- the rolling baseline profile
+    noise       JSONB NOT NULL,            -- per-dimension run-to-run stddev
+    history     JSONB NOT NULL,            -- recent measured profiles (rolling window)
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS gate_overrides (
+    id          BIGSERIAL PRIMARY KEY,
+    baseline    TEXT NOT NULL,
+    owner       TEXT NOT NULL,
+    reason      TEXT NOT NULL,
+    candidate   JSONB NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 

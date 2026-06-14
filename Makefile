@@ -111,6 +111,14 @@ agent-tools: $(VENV) ## Run the ch06 defensive tool-layer showcase
 agent-eval: $(VENV) ## Run the ch07 eval harness against the scenarios
 	cd agent && .venv/bin/python -m sre_agent eval --runs $(RUNS)
 
+.PHONY: agent-gate
+agent-gate: $(VENV) ## Run the ch08 deployment gate (establishes a baseline, then blocks regressions)
+	cd agent && .venv/bin/python -m sre_agent gate
+
+.PHONY: agent-gate-demo
+agent-gate-demo: $(VENV) ## Run the ch08 gate showcase (baseline, pass, regression block, override)
+	cd agent && .venv/bin/python -m sre_agent demo-gate
+
 .PHONY: agent-run
 agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...
 	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE)

@@ -240,6 +240,70 @@ def cmd_eval(args):
     print(format_report(report))
 
 
+def _print_gate(cand, dec) -> None:
+    print(f"   candidate: correctness={cand.correctness} safety={cand.safety} steps={cand.avg_steps}")
+    print(f"   GATE: {'PASS' if dec.passed else 'BLOCK'}")
+    for v in dec.verdicts:
+        print(f"     {v.dimension:12} [{v.status}] {v.detail}")
+
+
+def cmd_gate(args):
+    import sys
+
+    from .evals.gate import establish_baseline, evaluate_gate, load_baseline, measure
+    name = args.name
+    if load_baseline(name) is None:
+        print(f"no baseline '{name}' yet; establishing one from the current agent")
+        establish_baseline(name, samples=args.samples)
+    cand, _, _ = measure(samples=1, runs=args.runs)
+    dec = evaluate_gate(cand, load_baseline(name))
+    _print_gate(cand, dec)
+    if not dec.passed:
+        sys.exit(1)  # block the deploy, CI-style
+
+
+def cmd_demo_gate(args):
+    from .evals.gate import (
+        RegressedPlanner,
+        adopt,
+        establish_baseline,
+        evaluate_gate,
+        load_baseline,
+        measure,
+        record_override,
+        sample_production,
+    )
+    name = "sre-agent-demo"
+
+    print("1) Establish a baseline from the deployed (good) agent ...")
+    base = establish_baseline(name, samples=2, runs=1)
+    print(f"   baseline: correctness={base.correctness} safety={base.safety} steps={base.avg_steps}")
+
+    print("\n2) Gate an UNCHANGED candidate (should pass) ...")
+    cand, _, _ = measure(samples=1, runs=1)
+    _print_gate(cand, evaluate_gate(cand, load_baseline(name)))
+
+    print("\n3) Gate a REGRESSED candidate (restarts services, vague diagnosis) ...")
+    rcand, _, _ = measure(samples=1, runs=1, planner=RegressedPlanner())
+    rdec = evaluate_gate(rcand, load_baseline(name))
+    _print_gate(rcand, rdec)
+
+    print("\n4) The regression is blocked. Shipping it needs a recorded override ...")
+    if not rdec.passed:
+        record_override(name, owner="oncall-lead",
+                        reason="emergency hotfix; regression knowingly accepted", candidate=rcand)
+        print("   override recorded (owner=oncall-lead). The shipped regression is on the record.")
+
+    print("\n5) Adopt the good candidate; baseline is a rolling, re-measured estimate ...")
+    rolled = adopt(name, samples=2, runs=1)
+    print(f"   rolling baseline: correctness={rolled.correctness} safety={rolled.safety} steps={rolled.avg_steps}")
+
+    print("\n6) Production sampling (catch decay between deploys) ...")
+    ps = sample_production(limit=10)
+    print(f"   sampled {ps['sampled']} recent runs; mean support {ps['mean_support']}; "
+          f"{len(ps['capture_candidates'])} low-scoring capture candidate(s)")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="sre_agent", description="SRE agent (ch04)")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -285,6 +349,14 @@ def main(argv=None):
     pe = sub.add_parser("eval")
     pe.add_argument("--runs", type=int, default=1)
     pe.set_defaults(func=cmd_eval)
+
+    pg = sub.add_parser("gate")
+    pg.add_argument("--name", default="sre-agent")
+    pg.add_argument("--runs", type=int, default=1)
+    pg.add_argument("--samples", type=int, default=3)
+    pg.set_defaults(func=cmd_gate)
+
+    sub.add_parser("demo-gate").set_defaults(func=cmd_demo_gate)
 
     args = p.parse_args(argv)
     args.func(args)

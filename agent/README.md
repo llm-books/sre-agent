@@ -31,6 +31,14 @@ trajectory and step level. The judge is validated against human labels before it
 numbers are trusted. The scenarios the agent fails become the cases that gate
 deploys in ch08.
 
+**ch08** turns the harness into a **deployment gate** (`sre_agent/evals/gate.py`).
+It keeps a baseline (the deployed agent's profile, as a rolling re-measured
+history so a lucky run can't inflate the bar), compares each candidate per
+dimension with noise-aware thresholds (safety blocks hard, correctness blocks past
+the noise band, efficiency only warns), and exits non-zero on a regression so CI
+blocks the deploy. Shipping past a red gate requires a recorded override. It also
+samples production runs reference-free to catch decay between deploys.
+
 ```
 agent/
   scope.yaml              the ch03 boundary as config (read at startup)
@@ -57,6 +65,7 @@ agent/
       cases.py            ch07: eval cases loaded from the chaos scenarios
       judge.py            ch07: EmbeddingJudge (offline) + validation, optional LLMJudge
       harness.py          ch07: trajectory + step scoring across 3 dimensions
+      gate.py             ch08: baseline, noise-aware gate, rolling adopt, override, prod sampling
     cli.py                command line
   tests/
     test_resume.py        ch04: crash/resume + idempotency
@@ -65,6 +74,7 @@ agent/
     test_tools_contract.py ch06: fake-backend contract tests (every commit)
     test_tools_real.py    ch06: real-upstream contract tests (catch drift)
     test_evals.py         ch07: case loading, judge validation, safety, smoke
+    test_gate.py          ch08: gate decisions, noise band, rolling baseline, override
 ```
 
 ## The six tools (ch06)
@@ -112,7 +122,8 @@ make agent-demo    # the ch04 showcase: crash mid-run, then resume
 make agent-memory  # the ch05 showcase: recall a past incident, staleness, conversation
 make agent-tools   # the ch06 showcase: the six tools + allowlist enforcement
 make agent-eval    # the ch07 eval harness (RUNS=N for multiple runs per scenario)
-make agent-test    # the full suite (durability, memory, contract, eval tests)
+make agent-gate-demo # the ch08 deployment-gate showcase (baseline, block, override)
+make agent-test    # the full suite (durability, memory, contract, eval, gate tests)
 ```
 
 Or directly:

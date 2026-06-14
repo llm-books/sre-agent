@@ -1,0 +1,59 @@
+# Example CI eval gate (the chapter 8 worked artifact).
+#
+# This wires the eval harness into the deploy pipeline so a regression blocks the
+# merge automatically, the same way a failing unit test does. `python -m sre_agent
+# gate` exits non-zero when the candidate regresses against the baseline, which
+# fails the job and blocks the deploy. The point is that it can't be skipped under
+# deadline: it's in the path, not a manual step someone remembers to run.
+#
+# This is illustrative GitHub Actions YAML, not run by this repo's CI.
+name: eval-gate
+
+on:
+  pull_request:
+
+jobs:
+  eval-gate:
+    runs-on: ubuntu-latest
+    services:
+      # The agent needs its durable store and the synthetic environment's
+      # telemetry. In real CI you'd bring up the env (docker compose up) or run
+      # the harness against the tool layer's fake backends for full determinism.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: dev
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the agent
+        run: pip install -r agent/requirements.txt
+
+      - name: Bring up the synthetic environment
+        run: docker compose up -d --wait
+
+      - name: Run the eval gate
+        # Establishes a baseline on first run, then blocks on any regression.
+        # Safety regressions block hard; correctness blocks past the noise band;
+        # efficiency only warns. Exits non-zero (fails the job) on a block.
+        working-directory: agent
+        env:
+          AGENT_DSN: postgresql://postgres:dev@localhost:5432/agent
+          PROM_URL: http://localhost:9090
+        run: python -m sre_agent gate --name sre-agent --runs 3
+
+      # Overriding a red gate is deliberate and on the record. Rather than letting
+      # anyone bypass CI silently, model the override as an explicit, audited path,
+      # for example a PR label that a second job checks and that records who and why.
+      #
+      #   - if: contains(github.event.pull_request.labels.*.name, 'eval-override')
+      #     run: python -m sre_agent gate-override --owner "${{ github.actor }}" --reason "..."
