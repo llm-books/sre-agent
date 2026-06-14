@@ -36,6 +36,7 @@ class Decision:
     args: dict = field(default_factory=dict)
     hypothesis: str | None = None     # when action == "conclude"
     remediation: str | None = None    # when action == "conclude"
+    action_id: str | None = None      # ch12: the rollout remediation id, when concluding
 
     def to_dict(self) -> dict:
         return {
@@ -45,6 +46,7 @@ class Decision:
             "args": self.args,
             "hypothesis": self.hypothesis,
             "remediation": self.remediation,
+            "action_id": self.action_id,
         }
 
     @staticmethod
@@ -106,9 +108,11 @@ class ScriptedPlanner:
                 f"which points at a query, index, or resource issue inside {svc}."
             )
             remediation = f"Investigate {svc} for a slow query or resource pressure."
+        from .rollout.config import for_service
         return Decision(
             action="conclude", hypothesis=hypothesis, remediation=remediation,
             reason="enough evidence gathered to form a hypothesis",
+            action_id=for_service(svc),
         )
 
 

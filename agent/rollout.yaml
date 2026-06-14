@@ -1,0 +1,69 @@
+# The rollout matrix (the chapter 12 worked artifact).
+#
+# Autonomy is granted per ACTION, not to the agent as a whole, based on the
+# action's eval track record and its stakes. Reversible, reliable, low-stakes
+# actions graduate to autonomous; high-stakes or less-reliable ones stay gated.
+# This is the configuration the third chaos day runs against.
+#
+# modes:  autonomous  the agent acts, a human reviews afterward
+#         assisted    the agent proposes, a human approves before it acts
+#         gated       the agent only proposes; a human decides and acts
+#         (forbidden actions are not here; they live in scope.yaml)
+#
+# env_effect:  reset      perform a real, reversible action against the service
+#              simulated  record the approved action without touching the env
+#              none       never executes (gated)
+
+remediations:
+  restore_index:
+    service: orders
+    mode: autonomous
+    stakes: low
+    reversible: true
+    command: restore-index
+    env_effect: reset
+    graduation: strong eval record on slow-query incidents; reversible
+
+  restart_worker:
+    service: notifications
+    mode: autonomous
+    stakes: low
+    reversible: true
+    command: rollout-restart
+    env_effect: reset
+    graduation: reversible and strongly reliable; restarting a stalled worker is safe
+
+  extend_timeout:
+    service: payments
+    mode: gated
+    stakes: moderate
+    reversible: true
+    command: config-set-timeout
+    env_effect: none
+    graduation: the evals show the agent's diagnosis of this incident is unreliable, so the remediation stays gated for a human to decide
+
+  rollback_config:
+    service: api-gateway
+    mode: assisted
+    stakes: high
+    reversible: true
+    command: config-rollback
+    env_effect: simulated
+    graduation: kept gated by choice; the gateway is the auth path for everything
+
+  address_leak:
+    service: inventory
+    mode: gated
+    stakes: high
+    reversible: partial
+    command: investigate-leak
+    env_effect: none
+    graduation: only ~75% reliable on the cascade; reliability and stakes both demand a human
+
+# Which remediation a service's incident maps to.
+service_remediation:
+  orders: restore_index
+  notifications: restart_worker
+  payments: extend_timeout
+  api-gateway: rollback_config
+  inventory: address_leak

@@ -139,6 +139,14 @@ agent-cost: $(VENV) ## Run the ch10 cost showcase (caching, routing, and a token
 agent-security: $(VENV) ## Run the ch11 security showcase (hostile log, guardrails, injection survival)
 	cd agent && .venv/bin/python -m sre_agent demo-security
 
+.PHONY: agent-rollout
+agent-rollout: $(VENV) ## Run the ch12 rollout showcase (per-action modes + autonomous fix)
+	cd agent && .venv/bin/python -m sre_agent demo-rollout
+
+.PHONY: agent-graduate
+agent-graduate: $(VENV) ## Show eval-grounded graduation recommendations vs the configured modes
+	cd agent && .venv/bin/python -m sre_agent graduate
+
 .PHONY: agent-run
 agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...
 	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE)

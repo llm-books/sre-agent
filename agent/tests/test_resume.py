@@ -56,18 +56,20 @@ def test_crash_then_resume_is_clean(orch):
     assert _count("steps", wf) == 4
     assert _count("actions", wf) == 0
 
-    # Resume: completes, records the remaining steps, performs the side effect ONCE.
+    # Resume: completes, records the remaining steps, performs the side effects
+    # ONCE. There are two: the recorded proposal and the ch12 remediation the
+    # autonomous rollout dispatches. Both are idempotent.
     state = o.run(wf)
     assert state.done
     assert state.hypothesis
-    assert _count("actions", wf) == 1
+    assert _count("actions", wf) == 2
     steps_after = _count("steps", wf)
     assert steps_after > 4
 
-    # Running again is a full replay: no new steps, no duplicate side effect.
+    # Running again is a full replay: no new steps, no duplicate side effects.
     o.run(wf)
     assert _count("steps", wf) == steps_after
-    assert _count("actions", wf) == 1
+    assert _count("actions", wf) == 2
 
 
 def test_idempotency_key_dedupes_side_effect(orch):

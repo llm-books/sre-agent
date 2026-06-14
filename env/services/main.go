@@ -169,7 +169,7 @@ func main() {
 				_, _, _, stopped, _ := f.snapshot()
 				depth += 5 // new work always arrives
 				if !stopped {
-					depth -= 5 // and is processed, so depth stays flat
+					depth -= 10 // processed faster than it arrives, so a backlog drains
 				}
 				if depth < 0 {
 					depth = 0

@@ -62,6 +62,14 @@ exfiltrating actions before they take effect. The point is that injection is
 survivable: even if the input filter misses, the deterministic layers contain it,
 so the worst a compromised agent can do is propose a remediation a human rejects.
 
+**ch12** adds **progressive rollout** (`sre_agent/rollout/`). The agent finally
+*acts*. Autonomy is granted per action (the `rollout.yaml` matrix), not to the
+agent as a whole: reversible, reliable, low-stakes remediations run autonomously,
+moderate ones go through an approval surface, and high-stakes ones stay gated.
+Graduation is grounded in the eval track record. The reference agent now resolves
+the silent notifications failure end to end, autonomously restarting the stalled
+worker, while high-stakes actions still escalate to a human.
+
 ```
 agent/
   scope.yaml              the ch03 boundary as config (read at startup)
@@ -98,6 +106,10 @@ agent/
       permissions.py      ch11: credential-level permission scoping (read-only)
       output_guards.py    ch11: reject destructive/exfiltrating actions
       threat_model.py     ch11: the SRE agent's threat-model worksheet
+    rollout/
+      config.py           ch12: load the rollout matrix (rollout.yaml)
+      graduation.py       ch12: recommend a mode from the eval track record + stakes
+      approval.py         ch12: the approval surface (assisted mode)
     cli.py                command line
   tests/
     test_resume.py        ch04: crash/resume + idempotency
@@ -110,6 +122,7 @@ agent/
     test_observability.py ch09: tracing no-op safety, drift classification
     test_cost.py          ch10: caching/routing savings, budget early-wrapup
     test_guardrails.py    ch11: input scan, permission scoping, output guard, injection survival
+    test_rollout.py       ch12: matrix loads, graduation logic, dispatch by mode
 ```
 
 ## The six tools (ch06)
@@ -162,7 +175,8 @@ make agent-trace     # the ch09 trace showcase (run an incident, confirm it reac
 make agent-drift-demo # the ch09 drift showcase (silent failure caught by env drift)
 make agent-cost      # the ch10 cost showcase (caching, routing, token budget)
 make agent-security  # the ch11 security showcase (hostile log, guardrails, injection survival)
-make agent-test    # the full suite (durability, memory, contract, eval, gate, obs, cost, security)
+make agent-rollout   # the ch12 rollout showcase (per-action modes + autonomous silent-failure fix)
+make agent-test    # the full suite (durability ... security, rollout)
 ```
 
 Or directly:
@@ -199,12 +213,12 @@ regenerate it.
 
 ## What's still basic here
 
-The tool layer is now defensive (ch06), but `scoped_kubectl` writes stay
-simulated and shadow-only until the chapter 12 rollout work, so nothing in the
-real environment is mutated yet. As of ch09 the services emit OpenTelemetry
-traces, so `trace_lookup` returns real service traces. The memory embedder is a
-deterministic local one so the demo runs offline; swap in a real embedding model
-and vector DB for production.
+As of ch12 the agent performs real, reversible remediations on graduated actions
+(through `scoped_kubectl` with an approval token), restarting a service in the
+synthetic environment; high-stakes actions still escalate to a human. As of ch09
+the services emit OpenTelemetry traces, so `trace_lookup` returns real service
+traces. The memory embedder is a deterministic local one so the demo runs offline;
+swap in a real embedding model and vector DB for production.
 
 ## Configuration
 

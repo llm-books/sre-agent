@@ -278,6 +278,106 @@ def cmd_demo_cost(args):
     _print_cost(profile_run(wf2))
 
 
+def cmd_rollout(args):
+    from .rollout.config import all_remediations
+    print(f"  {'action':16} {'service':13} {'mode':11} {'stakes':9} {'env effect':10} graduation")
+    for r in all_remediations().values():
+        print(f"  {r.action_id:16} {r.service:13} {r.mode:11} {r.stakes:9} {r.env_effect:10} {r.graduation}")
+
+
+def _queue_depth():
+    # Read the service's real-time gauge directly; Prometheus only scrapes every
+    # 15s, which is too coarse for a fast-changing queue in a short demo.
+    import re
+
+    import requests
+    try:
+        r = requests.get("http://localhost:8086/metrics", timeout=5)
+        m = re.search(r'worker_queue_depth\{[^}]*\}\s+([0-9.eE+-]+)', r.text)
+        return float(m.group(1)) if m else 0.0
+    except Exception:
+        return 0.0
+
+
+def cmd_demo_rollout(args):
+    import time
+
+    import requests
+
+    orch = Orchestrator(use_memory=False)
+    cases = [("orders", "HighRequestLatency"), ("payments", "HighErrorRate"),
+             ("api-gateway", "HighErrorRate"), ("inventory", "HighRequestLatency")]
+
+    print("Per-action rollout: the agent acts on what it has earned, proposes the rest.\n")
+    run = 8000
+    for svc, alert in cases:
+        run += 1
+        inc = Incident(alert=alert, service=svc)
+        wf = make_workflow_id(inc, run=run)
+        orch.reset(wf)
+        orch.start(inc, run=run)
+        state = orch.run(wf)
+        verb = "ACTED" if state.acted else "escalated/proposed"
+        print(f"  {svc:12} -> {str(state.proposed_action_id):16} "
+              f"mode={str(state.rollout_mode):11} {verb}")
+
+    print("\nThe silent notifications failure, resolved autonomously end to end:")
+    notif = "http://localhost:8086"
+    try:
+        requests.post(f"{notif}/admin/fault", json={"stop_processing": True}, timeout=5)
+    except Exception as e:
+        print(f"   (could not inject: {e})")
+        return
+    print("   injected; waiting 20s for the queue to climb ...")
+    time.sleep(20)
+    before = _queue_depth()
+    inc = Incident(alert="Anomaly-notifications", service="notifications")
+    wf = make_workflow_id(inc, run=8099)
+    orch.reset(wf)
+    orch.start(inc, run=8099)
+    state = orch.run(wf)
+    print(f"   agent: {state.rollout_mode}; acted={state.acted} (restart_worker)")
+    print("   waiting 30s for the worker to drain the backlog ...")
+    time.sleep(30)
+    after = _queue_depth()
+    print(f"   notifications queue depth: {before} -> {after}  "
+          f"({'draining, the worker is processing again' if after < before else 'still high'})")
+
+
+def cmd_approvals(args):
+    from . import db
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT workflow_id, action_id, status, reviewer, reason "
+            "FROM approvals ORDER BY created_at DESC LIMIT 20").fetchall()
+    if not rows:
+        print("no approvals recorded")
+    for r in rows:
+        print(f"  [{r['status']:8}] {r['action_id']:16} by {r['reviewer'] or '-'}: {r['reason'] or ''}")
+
+
+def cmd_graduate(args):
+    from .evals.harness import run_evals
+    from .rollout.config import all_remediations
+    from .rollout.graduation import recommend_mode
+
+    print("Graduation grounded in the eval track record (recommended vs configured):\n")
+    report = run_evals(runs=1)
+    rates = {t.case: t for t in report.trajectories}
+    # map a remediation's service to its scenario's rates
+    svc_scenario = {"orders": "orders-slow-query", "notifications": "notifications-silent-failure",
+                    "payments": "payments-provider-timeout", "api-gateway": "gateway-bad-config",
+                    "inventory": "inventory-leak-cascade"}
+    for r in all_remediations().values():
+        t = rates.get(svc_scenario.get(r.service))
+        corr = t.correctness_rate if t else 0.0
+        safe = t.safety_rate if t else 1.0
+        rec, why = recommend_mode(corr, safe, r.stakes)
+        flag = "" if rec == r.mode else "  <- differs from config"
+        print(f"  {r.action_id:16} corr={corr} safe={safe} stakes={r.stakes:9} "
+              f"-> recommend {rec:11} (configured {r.mode}){flag}")
+
+
 def cmd_threat_model(args):
     from .guardrails.threat_model import render
     print(render())
@@ -520,6 +620,11 @@ def main(argv=None):
     pco.add_argument("--id", required=True)
     pco.set_defaults(func=cmd_cost)
     sub.add_parser("demo-cost").set_defaults(func=cmd_demo_cost)
+
+    sub.add_parser("rollout").set_defaults(func=cmd_rollout)
+    sub.add_parser("demo-rollout").set_defaults(func=cmd_demo_rollout)
+    sub.add_parser("approvals").set_defaults(func=cmd_approvals)
+    sub.add_parser("graduate").set_defaults(func=cmd_graduate)
 
     sub.add_parser("threat-model").set_defaults(func=cmd_threat_model)
     sub.add_parser("demo-security").set_defaults(func=cmd_demo_security)

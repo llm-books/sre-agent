@@ -54,6 +54,59 @@ class Executor:
         d["tool"] = tool
         return d
 
+    def execute_remediation(self, conn, workflow_id: str, rem) -> dict:
+        """Actually perform a graduated remediation (ch12), idempotently.
+
+        For env_effect 'reset' this performs a real, reversible action against the
+        service (clearing its injected fault, the synthetic-environment stand-in
+        for restoring an index or restarting a stalled worker). 'simulated' records
+        the approved action without touching the env. Recorded under an idempotency
+        key so a replay or retry does not act twice."""
+        import os
+
+        import requests
+
+        from .tools import scoped_kubectl
+
+        key = f"{workflow_id}:remediation"
+        executed = False
+        detail = ""
+        if rem.env_effect == "reset":
+            # The catalog command is descriptive (e.g. "restore-index"); the actual
+            # cluster action for a reversible fix in this environment is a restart.
+            # It goes through scoped_kubectl with the approval token, so permission
+            # scoping and the allowlist both pass.
+            gate = scoped_kubectl({"command": "rollout-restart", "target": rem.service, "approved": True})
+            if gate.ok:
+                ports = {"web": 8081, "api-gateway": 8082, "orders": 8083,
+                         "payments": 8084, "inventory": 8085, "notifications": 8086}
+                base = os.environ.get(f"{rem.service.upper().replace('-', '_')}_URL",
+                                      f"http://localhost:{ports.get(rem.service, 8080)}")
+                try:
+                    requests.post(f"{base}/admin/reset", timeout=5)
+                    executed = True
+                    detail = f"performed {rem.command} on {rem.service}"
+                except Exception as e:
+                    detail = f"action failed: {e}"
+            else:
+                detail = f"refused by tool: {gate.reason}"
+        elif rem.env_effect == "simulated":
+            executed = True
+            detail = f"recorded {rem.command} on {rem.service} (simulated config change)"
+        else:
+            detail = "no executable effect; proposal only"
+
+        action = {"action_id": rem.action_id, "command": rem.command,
+                  "service": rem.service, "executed": executed, "detail": detail}
+        from psycopg.types.json import Json
+        conn.execute(
+            "INSERT INTO actions (idempotency_key, workflow_id, step_index, action) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (idempotency_key) DO NOTHING",
+            (key, workflow_id, -1, Json(action)),
+        )
+        conn.commit()
+        return action
+
     def record_proposal(
         self, conn, workflow_id: str, step_index: int, hypothesis: str, remediation: str
     ) -> dict:

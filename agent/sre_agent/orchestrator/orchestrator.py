@@ -24,6 +24,7 @@ from ..guardrails import output_guards
 from ..memory.store import MemoryStore
 from ..observability import tracing
 from ..planner import Decision, Planner, default_planner
+from ..rollout import approval, config as rollout_config
 from ..state import Incident, InvestigationState
 from . import engine
 
@@ -51,6 +52,7 @@ class Orchestrator:
         self.scope = scope.load()
         self.memory = MemoryStore()
         self.conversation = ConversationStore()
+        self.approver = approval.Approver()  # ch12: stands in for the human reviewer
         # Evals run with memory off so each run is independent: recalling an
         # earlier eval run of the same scenario would make the runs non-i.i.d.
         self.use_memory = use_memory
@@ -183,6 +185,7 @@ class Orchestrator:
                                 act = result.get("action", {})
                                 state.hypothesis = act.get("hypothesis")
                                 state.proposed_remediation = act.get("remediation")
+                                state.proposed_action_id = decision.action_id
                                 tracing.set_attr(sp, "agent.hypothesis", state.hypothesis)
                                 tracing.set_attr(sp, "agent.remediation", state.proposed_remediation)
                             self._finish(conn, workflow_id)
@@ -209,6 +212,12 @@ class Orchestrator:
                                         workflow_id, "agent", f"Checked {decision.tool}.")
                             step_index += 1
                             self._maybe_crash(crash_after, step_index - 1, replayed)
+                # ch12: once concluded, dispatch the proposed remediation by its
+                # rollout mode. Idempotent, so it's safe after a fresh run or a
+                # resume (it runs here rather than inside the loop precisely so a
+                # crash between concluding and acting still disposes on resume).
+                if state.done and state.proposed_action_id:
+                    self._dispose(conn, workflow_id, state)
             tracing.flush()
             return state
         finally:
@@ -230,12 +239,51 @@ class Orchestrator:
             ).to_dict()
         return self.planner.next_step(state).to_dict()
 
+    def _dispose(self, conn, workflow_id: str, state: InvestigationState) -> None:
+        """Dispatch the proposed remediation by its rollout mode (ch12). Idempotent.
+        Autonomous actions execute; assisted actions request approval and execute
+        if approved, else escalate; gated actions are proposed only."""
+        rem = rollout_config.get(state.proposed_action_id)
+        if rem is None:
+            state.rollout_mode = "none"
+            return
+        state.rollout_mode = rem.mode
+        evidence = {"hypothesis": state.hypothesis,
+                    "remediation": state.proposed_remediation, "service": rem.service}
+
+        if rem.mode == "autonomous":
+            outcome = self.executor.execute_remediation(conn, workflow_id, rem)
+            state.acted = bool(outcome.get("executed"))
+            self.conversation.append(workflow_id, "agent",
+                                     f"Acted autonomously: {outcome.get('detail')}")
+        elif rem.mode == "assisted":
+            approval_id = approval.request(workflow_id, rem.action_id, evidence)
+            decision = self.approver.decide(rem)
+            approval.record_decision(approval_id, decision.approved, decision.reviewer, decision.reason)
+            if decision.approved:
+                outcome = self.executor.execute_remediation(conn, workflow_id, rem)
+                state.acted = bool(outcome.get("executed"))
+                self.conversation.append(workflow_id, "agent",
+                                         f"Approved by {decision.reviewer}; acted: {outcome.get('detail')}")
+            else:
+                state.acted = False
+                self.conversation.append(workflow_id, "agent",
+                                         f"Held by {decision.reviewer}: {decision.reason}; escalated.")
+        else:  # gated
+            state.acted = False
+            self.conversation.append(workflow_id, "agent",
+                                     "Gated: proposed only, escalated to a human.")
+
     def _replay_state(self, conn, workflow_id: str, incident: Incident) -> InvestigationState:
         state = InvestigationState(incident=incident)
         for row in engine.replay_steps(conn, workflow_id):
             if row["kind"] == "tool":
                 req, res = row["request"], row["result"]
                 state.add_evidence(req.get("tool"), "", res.get("data"))
+            elif row["kind"] == "decide" and row["result"].get("action") == "conclude":
+                # ch12: recover the proposed remediation id so a resumed run can
+                # still dispatch it after the loop.
+                state.proposed_action_id = row["result"].get("action_id")
             elif row["kind"] == "action":
                 act = row["result"].get("action", {})
                 state.hypothesis = act.get("hypothesis")
@@ -283,12 +331,15 @@ class Orchestrator:
         # diagnosis. The diagnosis goes in root_cause. Keeping the symptom aligned
         # with the recall query is what makes similarity search actually match.
         symptom = self._symptom_query(state.incident)
+        # Store the base diagnosis, stripped of any Memory clause we appended, so a
+        # recalled-then-re-remembered hypothesis doesn't nest on itself.
+        base = (state.hypothesis or "").split(" Memory:")[0].split(" (A past incident")[0].strip()
         self.memory.remember(
             conn,
             workflow_id=workflow_id,
             service=state.incident.service,
             symptom=symptom,
-            root_cause=state.hypothesis,
+            root_cause=base,
             remediation=state.proposed_remediation,
             service_version=state.service_version,
         )

@@ -39,6 +39,11 @@ class InvestigationState:
     # service's current version, used to judge whether a recollection is stale.
     recalled: list[Any] = field(default_factory=list)
     service_version: str | None = None
+    # ch12: the proposed remediation's rollout id, how it was dispatched, and
+    # whether the agent actually acted (autonomous or approved) vs only proposing.
+    proposed_action_id: str | None = None
+    rollout_mode: str | None = None
+    acted: bool = False
 
     def add_evidence(self, kind: str, summary: str, data: Any = None) -> None:
         self.evidence.append({"kind": kind, "summary": summary, "data": data})

@@ -92,6 +92,21 @@ CREATE TABLE IF NOT EXISTS gate_overrides (
     candidate   JSONB NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Approval surface (ch12). An action in assisted mode creates an approval request
+-- carrying the agent's evidence; a human approves or rejects, on the record. A
+-- rejection is a labeled example of the agent being wrong, so it's a capture
+-- candidate for the eval set.
+CREATE TABLE IF NOT EXISTS approvals (
+    id          BIGSERIAL PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    action_id   TEXT NOT NULL,
+    evidence    JSONB NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
+    reviewer    TEXT,
+    reason      TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 
