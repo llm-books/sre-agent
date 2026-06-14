@@ -39,6 +39,14 @@ the noise band, efficiency only warns), and exits non-zero on a regression so CI
 blocks the deploy. Shipping past a red gate requires a recorded override. It also
 samples production runs reference-free to catch decay between deploys.
 
+**ch09** adds **observability** (`sre_agent/observability/`). The agent emits an
+OpenTelemetry trace of every incident to Tempo, with the full prompt, completion,
+and hypothesis on each span (semantic logging), so any run is reconstructable. The
+services also start emitting traces here, so `trace_lookup` returns real service
+traces. Drift detection watches two families: the agent's own behavior, and the
+environment's telemetry, the signals with no threshold alert, which is how the
+silent notifications failure gets caught.
+
 ```
 agent/
   scope.yaml              the ch03 boundary as config (read at startup)
@@ -66,6 +74,9 @@ agent/
       judge.py            ch07: EmbeddingJudge (offline) + validation, optional LLMJudge
       harness.py          ch07: trajectory + step scoring across 3 dimensions
       gate.py             ch08: baseline, noise-aware gate, rolling adopt, override, prod sampling
+    observability/
+      tracing.py          ch09: OpenTelemetry spans to Tempo, best-effort
+      drift.py            ch09: two-family drift (agent behavior + environment signals)
     cli.py                command line
   tests/
     test_resume.py        ch04: crash/resume + idempotency
@@ -75,6 +86,7 @@ agent/
     test_tools_real.py    ch06: real-upstream contract tests (catch drift)
     test_evals.py         ch07: case loading, judge validation, safety, smoke
     test_gate.py          ch08: gate decisions, noise band, rolling baseline, override
+    test_observability.py ch09: tracing no-op safety, drift classification
 ```
 
 ## The six tools (ch06)
@@ -123,7 +135,9 @@ make agent-memory  # the ch05 showcase: recall a past incident, staleness, conve
 make agent-tools   # the ch06 showcase: the six tools + allowlist enforcement
 make agent-eval    # the ch07 eval harness (RUNS=N for multiple runs per scenario)
 make agent-gate-demo # the ch08 deployment-gate showcase (baseline, block, override)
-make agent-test    # the full suite (durability, memory, contract, eval, gate tests)
+make agent-trace     # the ch09 trace showcase (run an incident, confirm it reached Tempo)
+make agent-drift-demo # the ch09 drift showcase (silent failure caught by env drift)
+make agent-test    # the full suite (durability, memory, contract, eval, gate, obs tests)
 ```
 
 Or directly:
@@ -162,10 +176,10 @@ regenerate it.
 
 The tool layer is now defensive (ch06), but `scoped_kubectl` writes stay
 simulated and shadow-only until the chapter 12 rollout work, so nothing in the
-real environment is mutated yet. `trace_lookup` queries Tempo, which is empty
-until the chapter 9 build emits traces. The memory embedder is a deterministic
-local one so the demo runs offline; swap in a real embedding model and vector DB
-for production.
+real environment is mutated yet. As of ch09 the services emit OpenTelemetry
+traces, so `trace_lookup` returns real service traces. The memory embedder is a
+deterministic local one so the demo runs offline; swap in a real embedding model
+and vector DB for production.
 
 ## Configuration
 

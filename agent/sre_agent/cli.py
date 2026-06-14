@@ -240,6 +240,83 @@ def cmd_eval(args):
     print(format_report(report))
 
 
+def cmd_drift(args):
+    from .observability.drift import drift_report
+    rep = drift_report()
+    print("agent-behavior drift (the agent's own runs):")
+    for f in rep["agent"]:
+        print(f"  [{f.status:5}] {f.signal} = {f.value} (threshold {f.threshold})  {f.detail}")
+    print("\nenvironment drift (signals with no threshold alert):")
+    for f in rep["environment"]:
+        mark = "DRIFT" if f.status == "drift" else "ok"
+        print(f"  [{mark:5}] {f.signal} = {f.value} (normal_max {f.threshold})  {f.detail}")
+
+
+def cmd_demo_drift(args):
+    import os
+    import time
+
+    import requests
+
+    from .observability.drift import environment_drift
+    notif = os.environ.get("NOTIF_URL", "http://localhost:8086")
+
+    def post(path, **kw):
+        try:
+            requests.post(f"{notif}{path}", timeout=5, **kw)
+            return True
+        except Exception as e:
+            print(f"   (could not reach notifications at {notif}{path}: {e})")
+            return False
+
+    def show():
+        for f in environment_drift():
+            mark = "DRIFT" if f.status == "drift" else "ok"
+            print(f"  [{mark:5}] {f.signal} = {f.value} (normal_max {f.threshold})  {f.detail}")
+
+    print("1) Environment signals before the fault (notifications queue should be normal):")
+    show()
+    print("\n2) Injecting the silent notifications failure (worker stops; NO alert fires) ...")
+    post("/admin/fault", json={"stop_processing": True})
+    print(f"   waiting {args.wait}s for the queue to climb out of band ...")
+    time.sleep(args.wait)
+    print("\n3) Drift detection catches it via the environment signal, with no alert:")
+    show()
+    if post("/admin/reset"):
+        print("\n4) fault cleared.")
+    else:
+        print("\n4) clear the fault with: make chaos-clear-all")
+
+
+def cmd_demo_trace(args):
+    import os
+    import time
+
+    import requests
+
+    from .observability import tracing
+    orch = Orchestrator(use_memory=False)
+    incident = Incident(alert="HighRequestLatency", service="orders")
+    wf = make_workflow_id(incident, run=4242)
+    orch.reset(wf)
+    orch.start(incident, run=4242)
+    orch.run(wf)
+    tracing.flush()
+    print(f"ran {wf} with tracing on; flushed to Tempo.")
+    time.sleep(3)
+    tempo = os.environ.get("TEMPO_URL", "http://localhost:3200")
+    try:
+        r = requests.get(f"{tempo}/api/search",
+                         params={"tags": "service.name=sre-agent", "limit": 5}, timeout=5)
+        traces = r.json().get("traces") or []
+    except Exception as e:
+        print(f"could not query Tempo: {e}")
+        return
+    print(f"Tempo has {len(traces)} recent sre-agent trace(s):")
+    for t in traces[:3]:
+        print(f"  trace {t.get('traceID')}  root={t.get('rootTraceName')}  durationMs={t.get('durationMs')}")
+
+
 def _print_gate(cand, dec) -> None:
     print(f"   candidate: correctness={cand.correctness} safety={cand.safety} steps={cand.avg_steps}")
     print(f"   GATE: {'PASS' if dec.passed else 'BLOCK'}")
@@ -357,6 +434,12 @@ def main(argv=None):
     pg.set_defaults(func=cmd_gate)
 
     sub.add_parser("demo-gate").set_defaults(func=cmd_demo_gate)
+
+    sub.add_parser("drift").set_defaults(func=cmd_drift)
+    sub.add_parser("demo-trace").set_defaults(func=cmd_demo_trace)
+    pdd = sub.add_parser("demo-drift")
+    pdd.add_argument("--wait", type=int, default=30)
+    pdd.set_defaults(func=cmd_demo_drift)
 
     args = p.parse_args(argv)
     args.func(args)

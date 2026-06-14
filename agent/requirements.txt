@@ -6,3 +6,7 @@ PyYAML>=6.0
 # The scripted planner needs none of it and runs the durability demo offline.
 anthropic>=0.39 ; extra == "llm"
 redis>=5.0
+# ch09 observability: OpenTelemetry tracing, exported to Tempo over OTLP/HTTP.
+opentelemetry-api>=1.20
+opentelemetry-sdk>=1.20
+opentelemetry-exporter-otlp-proto-http>=1.20

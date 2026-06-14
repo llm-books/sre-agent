@@ -119,6 +119,18 @@ agent-gate: $(VENV) ## Run the ch08 deployment gate (establishes a baseline, the
 agent-gate-demo: $(VENV) ## Run the ch08 gate showcase (baseline, pass, regression block, override)
 	cd agent && .venv/bin/python -m sre_agent demo-gate
 
+.PHONY: agent-trace
+agent-trace: $(VENV) ## Run an incident with tracing on and confirm it reached Tempo
+	cd agent && .venv/bin/python -m sre_agent demo-trace
+
+.PHONY: agent-drift
+agent-drift: $(VENV) ## Show drift detection over both families (agent + environment)
+	cd agent && .venv/bin/python -m sre_agent drift
+
+.PHONY: agent-drift-demo
+agent-drift-demo: $(VENV) ## Inject the silent failure and watch environment drift catch it
+	cd agent && .venv/bin/python -m sre_agent demo-drift
+
 .PHONY: agent-run
 agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...
 	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE)

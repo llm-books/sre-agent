@@ -16,10 +16,12 @@ import requests
 from sre_agent.executor.tools import (
     LOKI_URL,
     PROM_URL,
+    TEMPO_URL,
     deploy_history,
     log_search,
     promql_query,
     runbook_search,
+    trace_lookup,
 )
 
 
@@ -60,3 +62,12 @@ def test_runbook_search_real_shape():
     res = runbook_search({"query": "payments"})
     assert res.ok
     assert isinstance(res.data, list)
+
+
+def test_trace_lookup_real_shape():
+    if not _reachable(f"{TEMPO_URL}/ready"):
+        pytest.skip("Tempo not reachable")
+    # Valid shape (a traces count); may be zero if no recent traffic.
+    res = trace_lookup({"service": "orders"})
+    assert res.ok
+    assert "traces" in res.data

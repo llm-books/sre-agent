@@ -21,6 +21,7 @@ from ..conversation import ConversationStore
 from ..executor.executor import Executor
 from ..executor.tools import fetch_deploys
 from ..memory.store import MemoryStore
+from ..observability import tracing
 from ..planner import Decision, Planner, default_planner
 from ..state import Incident, InvestigationState
 from . import engine
@@ -126,58 +127,76 @@ class Orchestrator:
                     f"Seen a similar symptom on {incident.service} before "
                     f"({top.occurred_at[:10]}); weighing it against current signals.")
 
-            while not state.done:
-                if step_index % 2 == 0:
-                    # DECIDE. The planner is only invoked for a NEW step; a recorded
-                    # decision is replayed, so resume reuses the earlier reasoning.
-                    result, replayed = engine.get_or_record_step(
-                        conn, workflow_id, step_index, "decide",
-                        {"evidence_count": state.step_count},
-                        compute=lambda c: self.planner.next_step(state).to_dict(),
-                    )
-                    if not replayed:
-                        d = Decision.from_dict(result)
-                        what = d.tool or d.action
-                        self.conversation.append(workflow_id, "agent", f"Next: {what}. {d.reason}")
-                    step_index += 1
-                    self._maybe_crash(crash_after, step_index - 1, replayed)
-                else:
-                    decision = Decision.from_dict(engine.get_step(conn, workflow_id, step_index - 1))
-                    if decision.action == "conclude":
-                        # ch05: fold a relevant, non-stale recollection into the
-                        # hypothesis before recording it.
-                        hypothesis = self._augment_with_memory(decision.hypothesis, state)
-                        result, replayed = engine.get_or_record_step(
-                            conn, workflow_id, step_index, "action",
-                            {"kind": "record_proposal"},
-                            compute=lambda c: self.executor.record_proposal(
-                                c, workflow_id, step_index,
-                                hypothesis, decision.remediation),
-                        )
-                        act = result.get("action", {})
-                        state.hypothesis = act.get("hypothesis")
-                        state.proposed_remediation = act.get("remediation")
-                        self._finish(conn, workflow_id)
-                        # ch05: write this incident into long-term memory. Idempotent
-                        # per workflow, so replay or re-run does not duplicate it.
-                        if self.use_memory:
-                            self._remember(conn, workflow_id, state)
-                        self.conversation.append(
-                            workflow_id, "agent", f"Proposed: {state.proposed_remediation}")
-                        state.done = True
-                        step_index += 1
-                    else:
-                        result, replayed = engine.get_or_record_step(
-                            conn, workflow_id, step_index, "tool",
-                            {"tool": decision.tool, "args": decision.args},
-                            compute=lambda c: self.executor.run_tool(decision),
-                        )
-                        state.add_evidence(decision.tool, decision.reason, result.get("data"))
-                        if not replayed:
-                            self.conversation.append(
-                                workflow_id, "agent", f"Checked {decision.tool}.")
+            # ch09: the whole investigation is one root span; each step a child
+            # span. The trace is the substrate for evals, the gate, and drift.
+            with tracing.span("incident", workflow_id=workflow_id,
+                              alert=incident.alert, service=incident.service):
+                while not state.done:
+                    if step_index % 2 == 0:
+                        # DECIDE. The planner is only invoked for a NEW step; a
+                        # recorded decision is replayed, so resume reuses it.
+                        with tracing.span("model.decide") as sp:
+                            tracing.set_attr(sp, "step.index", step_index)
+                            result, replayed = engine.get_or_record_step(
+                                conn, workflow_id, step_index, "decide",
+                                {"evidence_count": state.step_count},
+                                compute=lambda c: self.planner.next_step(state).to_dict(),
+                            )
+                            if not replayed:
+                                d = Decision.from_dict(result)
+                                # Full prompt-context and completion on the span, plus
+                                # the semantic 'why', so a reasoning failure is legible.
+                                tracing.set_attr(sp, "llm.prompt", state.evidence)
+                                tracing.set_attr(sp, "llm.completion", d.to_dict())
+                                tracing.set_attr(sp, "agent.hypothesis", d.hypothesis or d.reason)
+                                what = d.tool or d.action
+                                self.conversation.append(
+                                    workflow_id, "agent", f"Next: {what}. {d.reason}")
                         step_index += 1
                         self._maybe_crash(crash_after, step_index - 1, replayed)
+                    else:
+                        decision = Decision.from_dict(engine.get_step(conn, workflow_id, step_index - 1))
+                        if decision.action == "conclude":
+                            with tracing.span("action.record_proposal") as sp:
+                                tracing.set_attr(sp, "step.index", step_index)
+                                hypothesis = self._augment_with_memory(decision.hypothesis, state)
+                                result, replayed = engine.get_or_record_step(
+                                    conn, workflow_id, step_index, "action",
+                                    {"kind": "record_proposal"},
+                                    compute=lambda c: self.executor.record_proposal(
+                                        c, workflow_id, step_index,
+                                        hypothesis, decision.remediation),
+                                )
+                                act = result.get("action", {})
+                                state.hypothesis = act.get("hypothesis")
+                                state.proposed_remediation = act.get("remediation")
+                                tracing.set_attr(sp, "agent.hypothesis", state.hypothesis)
+                                tracing.set_attr(sp, "agent.remediation", state.proposed_remediation)
+                            self._finish(conn, workflow_id)
+                            # ch05: write to long-term memory, idempotent per workflow.
+                            if self.use_memory:
+                                self._remember(conn, workflow_id, state)
+                            self.conversation.append(
+                                workflow_id, "agent", f"Proposed: {state.proposed_remediation}")
+                            state.done = True
+                            step_index += 1
+                        else:
+                            with tracing.span(f"tool.{decision.tool}") as sp:
+                                tracing.set_attr(sp, "step.index", step_index)
+                                tracing.set_attr(sp, "tool.args", decision.args)
+                                result, replayed = engine.get_or_record_step(
+                                    conn, workflow_id, step_index, "tool",
+                                    {"tool": decision.tool, "args": decision.args},
+                                    compute=lambda c: self.executor.run_tool(decision),
+                                )
+                                tracing.set_attr(sp, "tool.status", result.get("status"))
+                                state.add_evidence(decision.tool, decision.reason, result.get("data"))
+                                if not replayed:
+                                    self.conversation.append(
+                                        workflow_id, "agent", f"Checked {decision.tool}.")
+                            step_index += 1
+                            self._maybe_crash(crash_after, step_index - 1, replayed)
+            tracing.flush()
             return state
         finally:
             conn.close()

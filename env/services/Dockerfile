@@ -13,5 +13,8 @@ FROM alpine:3.20
 RUN adduser -D -u 10001 app
 USER app
 COPY --from=build /bin/sre-service /bin/sre-service
+# All six instances export traces to Tempo over OTLP/HTTP (ch09). Override per
+# instance in docker-compose if needed.
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
 EXPOSE 8080
 ENTRYPOINT ["/bin/sre-service"]

@@ -28,7 +28,35 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
+
+// initTracer wires OpenTelemetry tracing to Tempo over OTLP/HTTP. Added in the
+// chapter 9 build: the services start emitting traces here, so the agent's
+// trace_lookup tool returns real service traces. The endpoint comes from
+// OTEL_EXPORTER_OTLP_ENDPOINT. Best-effort: if the exporter can't start, the
+// service runs untraced rather than failing.
+func initTracer(ctx context.Context, name string, log *slog.Logger) func() {
+	exp, err := otlptracehttp.New(ctx)
+	if err != nil {
+		log.Warn("tracing disabled", "err", err.Error())
+		return func() {}
+	}
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exp),
+		sdktrace.WithResource(resource.NewSchemaless(
+			attribute.String("service.name", name))),
+	)
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	return func() { _ = tp.Shutdown(context.Background()) }
+}
 
 // faults holds the injectable failure state. The chaos engine flips these.
 type faults struct {
@@ -76,7 +104,14 @@ func (f *faults) set(field string, value any) {
 func (f *faults) reset() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	*f = faults{}
+	// Reset the fields individually. Do NOT do `*f = faults{}`: that would
+	// replace the embedded mutex itself with a fresh (unlocked) one, and the
+	// deferred Unlock would then fatal with "Unlock of unlocked RWMutex".
+	f.latencyMillis = 0
+	f.errorRate = 0
+	f.depTimeout = false
+	f.stopProcessing = false
+	f.memLeakOn = false
 }
 
 func toInt(v any) (int, bool) {
@@ -96,6 +131,9 @@ func main() {
 	isWorker := env("ROLE", "") == "worker"
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", name)
+
+	shutdown := initTracer(context.Background(), name, log)
+	defer shutdown()
 
 	reqs := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "http_requests_total",
@@ -216,7 +254,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           otelhttp.NewHandler(mux, "http.server"),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Info("starting", "port", port, "dependencies", deps, "worker", isWorker)
@@ -230,7 +268,12 @@ func main() {
 // hang past a short client deadline and then fail, which is how the payments
 // provider-timeout scenario propagates upstream.
 func callDeps(ctx context.Context, deps []string, depTimeout bool) error {
-	client := &http.Client{Timeout: 3 * time.Second}
+	// otelhttp transport propagates the trace context to downstream services, so a
+	// checkout flows web -> gateway -> orders -> payments/inventory as one trace.
+	client := &http.Client{
+		Timeout:   3 * time.Second,
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	}
 	for _, url := range deps {
 		reqCtx := ctx
 		if depTimeout {

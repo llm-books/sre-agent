@@ -13,6 +13,7 @@ Tracing tools query Tempo, which is empty until the ch09 build emits traces, so
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from datetime import datetime
@@ -41,11 +42,15 @@ def promql_query(args: dict) -> ToolResult:
     query = args["query"]
     op = lambda t: http_get_json(f"{PROM_URL}/api/v1/query", {"query": query}, t)
     res = defensive_call(op, schema=schemas.PROMQL, timeout=10)
+    # Drop non-finite samples. A PromQL ratio over a zero denominator returns NaN,
+    # and NaN/Inf are not valid JSON, so they would break the durable-log write.
+    # An undefined ratio is honestly represented as "no sample", not as garbage.
     return res.map(lambda b: {
         "query": query,
         "samples": [
             {"labels": r.get("metric", {}), "value": float(r["value"][1])}
-            for r in b["data"]["result"] if r.get("value")
+            for r in b["data"]["result"]
+            if r.get("value") and math.isfinite(float(r["value"][1]))
         ],
     })
 
