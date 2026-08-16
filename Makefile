@@ -82,6 +82,7 @@ PY   = $(VENV)/bin/python
 ALERT   ?= HighRequestLatency
 SERVICE ?= orders
 RUNS    ?= 1
+RUN     ?= 1
 
 $(VENV): ## Create the agent venv and install dependencies
 	python3 -m venv $(VENV)
@@ -153,7 +154,11 @@ agent-multiagent: $(VENV) ## Run the ch13 experiment: does a verifier agent earn
 
 .PHONY: agent-run
 agent-run: $(VENV) ## Run one investigation: make agent-run ALERT=... SERVICE=...
-	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE)
+	cd agent && .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE) --run $(RUN)
+
+.PHONY: agent-run-groq
+agent-run-groq: $(VENV) ## Run one investigation with a real, very cheap model (needs GROQ_API_KEY)
+	cd agent && AGENT_PLANNER=groq .venv/bin/python -m sre_agent run --alert $(ALERT) --service $(SERVICE) --run $(RUN)
 
 .PHONY: agent-test
 agent-test: $(VENV) ## Run the agent's durability tests (needs the env up)

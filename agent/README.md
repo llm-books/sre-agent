@@ -85,7 +85,7 @@ agent/
     db.py                 Postgres connection + the durable-log + memory schema
     scope.py              loads and enforces scope.yaml
     state.py              the in-memory investigation state (rebuilt from the log)
-    planner.py            ScriptedPlanner (offline) + optional LLMPlanner (Anthropic)
+    planner.py            ScriptedPlanner (offline) + optional GroqPlanner / LLMPlanner
     conversation.py       ch05: conversation state in Redis, regenerable from task state
     memory/
       embeddings.py       ch05: LocalHashEmbedder (offline) behind an Embedder interface
@@ -218,10 +218,12 @@ no duplicate. That is the chapter 4 guarantee, made concrete:
 
 The planner is the only place a model belongs, behind a clean interface. By
 default the agent uses `ScriptedPlanner`, which is deterministic and needs no API
-key, so the durability machinery runs offline. Set `AGENT_PLANNER=llm` and
-`ANTHROPIC_API_KEY` to use a real model instead; its decisions are recorded in the
-durable log, so a resumed run reuses the earlier reasoning rather than paying to
-regenerate it.
+key, so the durability machinery runs offline. To put a real model in the decide
+seat, set `AGENT_PLANNER=groq` and `GROQ_API_KEY` (cheapest; a small open model,
+a fraction of a cent per incident), or `AGENT_PLANNER=llm` and
+`ANTHROPIC_API_KEY` (needs `pip install anthropic`). Either way its decisions are
+recorded in the durable log, so a resumed run reuses the earlier reasoning rather
+than paying to regenerate it.
 
 ## What's still basic here
 
@@ -239,5 +241,6 @@ swap in a real embedding model and vector DB for production.
 | `AGENT_DSN` | `postgresql://postgres:dev@localhost:5432/agent` | the durable log + memory |
 | `REDIS_URL` | `redis://localhost:6379/0` | conversation state (best-effort) |
 | `PROM_URL` | `http://localhost:9090` | Prometheus for tool queries |
-| `AGENT_PLANNER` | `scripted` | set to `llm` for the Anthropic planner |
+| `AGENT_PLANNER` | `scripted` | `groq` for the Groq planner, `llm` for the Anthropic planner |
+| `GROQ_MODEL` | `openai/gpt-oss-20b` | model for the Groq planner |
 | `AGENT_SCOPE` | `agent/scope.yaml` | scope config path |
