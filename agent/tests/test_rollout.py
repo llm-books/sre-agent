@@ -74,3 +74,35 @@ def test_dispatch_by_mode():
 
     orch.reset(wf)
     orch.reset(wf2)
+
+
+@pytest.mark.skipif(not _db_up(), reason="agent Postgres not reachable")
+def test_guardrail_blocked_proposal_does_not_dispatch():
+    """A proposal the output guardrail blocks must escalate, not act, even when
+    the action's rollout mode is autonomous. Found live: a real model proposed
+    dropping an index; the guardrail rewrote the proposal but the dispatch still
+    keyed off action_id and executed the remediation."""
+    from sre_agent.orchestrator.orchestrator import Orchestrator, make_workflow_id
+    from sre_agent.planner import Decision
+    from sre_agent.state import Incident
+
+    class DestructivePlanner:
+        def next_step(self, state):
+            return Decision(
+                action="conclude",
+                hypothesis="the new index is the culprit",
+                remediation="drop the index on orders(created_at)",
+                reason="test",
+                action_id="restore_index",  # autonomous for orders
+            )
+
+    orch = Orchestrator(planner=DestructivePlanner(), use_memory=False)
+    inc = Incident(alert="HighRequestLatency", service="orders")
+    wf = make_workflow_id(inc, run=61003)
+    orch.reset(wf)
+    orch.start(inc, run=61003)
+    s = orch.run(wf)
+    assert "blocked by output guardrail" in s.proposed_remediation
+    assert s.acted is False
+    assert not _has_remediation(wf)
+    orch.reset(wf)

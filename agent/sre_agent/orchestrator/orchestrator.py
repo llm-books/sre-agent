@@ -33,6 +33,12 @@ class SimulatedCrash(RuntimeError):
     """Raised by the crash hook to demonstrate resume. Not a real failure."""
 
 
+# The most findings any investigation may gather before it must wrap up and
+# escalate. Generous: the scripted investigation needs 3. The bound exists for
+# real models, which can loop; an unbounded agent loop is an outage of its own.
+MAX_FINDINGS = 12
+
+
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
 
@@ -176,6 +182,10 @@ class Orchestrator:
                                     tracing.set_attr(sp, "guardrail.blocked", why)
                                     remediation = (f"[blocked by output guardrail: {why}] "
                                                    f"escalating to a human")
+                                    # A blocked proposal must not dispatch. Clearing
+                                    # the action id here is what makes "escalating
+                                    # to a human" true: ch12's dispatch keys off it.
+                                    decision.action_id = None
                                 result, replayed = engine.get_or_record_step(
                                     conn, workflow_id, step_index, "action",
                                     {"kind": "record_proposal"},
@@ -226,9 +236,23 @@ class Orchestrator:
     # ---- helpers ------------------------------------------------------------
 
     def _decide(self, state: InvestigationState, budget_tokens: int | None) -> dict:
-        """The next decision, unless the token budget is reached, in which case the
-        agent wraps up gracefully with what it has and escalates, rather than
-        spending through the ceiling."""
+        """The next decision, unless the token budget or the step ceiling is
+        reached, in which case the agent wraps up gracefully with what it has
+        and escalates, rather than spending through the ceiling.
+
+        The step ceiling is the loop's safety bound: a planner that never says
+        "conclude" (a looping model, a malformed reply pattern) must terminate
+        the investigation, not the reader's patience. The scripted planner can
+        never hit it; a real model found it on its first outing."""
+        if state.step_count >= MAX_FINDINGS:
+            return Decision(
+                action="conclude",
+                hypothesis=(f"Investigation of {state.incident.service} stopped at the "
+                            f"step ceiling after {state.step_count} findings without a "
+                            f"confident diagnosis; conclusion is partial."),
+                remediation="Escalate to a human to continue; the agent stopped at its step ceiling.",
+                reason="step ceiling reached",
+            ).to_dict()
         if budget_tokens and cost.cumulative_input_tokens(state.step_count) > budget_tokens:
             return Decision(
                 action="conclude",

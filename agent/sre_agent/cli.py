@@ -56,12 +56,15 @@ def _summarize(data) -> str:
     return json.dumps(data)[:80]
 
 
-def _action_count(workflow_id: str) -> int:
+def _action_counts(workflow_id: str) -> tuple[int, int]:
+    """(proposals, executed remediations) recorded for a workflow."""
     with db.connect() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM actions WHERE workflow_id = %s", (workflow_id,)
-        ).fetchone()
-        return row["n"]
+        rows = conn.execute(
+            "SELECT idempotency_key FROM actions WHERE workflow_id = %s", (workflow_id,)
+        ).fetchall()
+    keys = [r["idempotency_key"] for r in rows]
+    remediations = sum(1 for k in keys if k.endswith(":remediation"))
+    return len(keys) - remediations, remediations
 
 
 def cmd_init(args):
@@ -119,7 +122,8 @@ def cmd_demo_crash(args):
         print(f"   CRASH: {e}")
     print("\n   durable log at the moment of the crash:")
     _print_steps(wf)
-    print(f"   side-effect rows (actions table): {_action_count(wf)}  (expected 0, conclude not reached)")
+    proposals, remediations = _action_counts(wf)
+    print(f"   side-effect rows (actions table): {proposals + remediations}  (expected 0, conclude not reached)")
 
     print("\n2) Resuming the same workflow ...")
     state = orch.run(wf)
@@ -127,11 +131,14 @@ def cmd_demo_crash(args):
     print("\n   final durable log:")
     _print_steps(wf)
     print(f"\n   hypothesis: {state.hypothesis}")
-    print(f"   side-effect rows (actions table): {_action_count(wf)}  (expected exactly 1)")
+    proposals, remediations = _action_counts(wf)
+    print(f"   side-effect rows (actions table): {proposals} proposal + {remediations} executed remediation")
+    print("   (each exactly once; the remediation runs autonomously per ch12's rollout matrix)")
 
     print("\n3) Running once more (fully replayed) to show idempotency ...")
     orch.run(wf)
-    print(f"   side-effect rows still: {_action_count(wf)}  (expected still 1, no duplicate)")
+    proposals, remediations = _action_counts(wf)
+    print(f"   side-effect rows still: {proposals} proposal + {remediations} remediation  (no duplicates)")
 
 
 def cmd_recall(args):
