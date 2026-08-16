@@ -14,6 +14,11 @@ Two implementations:
                    workflow reuses the earlier reasoning instead of paying to
                    regenerate it and risking divergence.
 
+  GroqPlanner      the same idea on Groq's OpenAI-compatible API, defaulting to
+                   a small open model that costs a fraction of a cent per
+                   incident. Needs only GROQ_API_KEY; uses the requests package
+                   already in the dependency list, no new SDK.
+
 Both return the same Decision shape, so the orchestrator does not care which is
 in use. That is the orchestrator-executor split doing its job: the model's role
 is confined to deciding, behind a clean interface.
@@ -123,6 +128,49 @@ def _find(state: InvestigationState, tool: str) -> dict | None:
     return None
 
 
+_TOOLS = {"promql_query", "deploy_history"}
+
+
+def _decision_from_model_json(text: str, service: str) -> Decision:
+    """Parse a model's JSON reply into a Decision, defensively.
+
+    Models sometimes fence the JSON, add commentary keys, or omit fields. We
+    strip fences, keep only the fields Decision knows, and fill action_id from
+    the rollout config on conclude: which remediation maps to which service is
+    configuration, not a model decision.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`").split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text[: -3]
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError:
+        # Prose around the JSON is common without strict JSON mode; take the
+        # outermost object. Anything less parseable is the caller's retry.
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        raw = json.loads(text[start:end + 1])
+    known = {f for f in Decision.__dataclass_fields__}
+    d = Decision(**{k: v for k, v in raw.items() if k in known})
+    # Small models sometimes put the tool name in "action" instead of "tool".
+    # Normalize that one obvious mistake; anything else unrecognized must be a
+    # clean failure here, because an invalid action would otherwise never match
+    # "conclude" and the investigation would run forever.
+    if d.action not in ("tool", "conclude"):
+        if d.action in _TOOLS or d.tool:
+            d.tool = d.tool or d.action
+            d.action = "tool"
+        else:
+            raise ValueError(f"model returned invalid action: {d.action!r}")
+    if d.action == "conclude" and d.action_id is None:
+        from .rollout.config import for_service
+        d.action_id = for_service(service)
+    return d
+
+
 class LLMPlanner:
     """Decide the next step with a real model. Optional; needs ANTHROPIC_API_KEY."""
 
@@ -132,7 +180,10 @@ class LLMPlanner:
         '{"action":"tool","tool":"promql_query"|"deploy_history","args":{...},"reason":"..."}. '
         "When you have enough evidence, reply "
         '{"action":"conclude","hypothesis":"...","remediation":"...","reason":"..."}. '
-        "Available tools: promql_query(query), deploy_history(service)."
+        "Available tools: promql_query(query), deploy_history(service). "
+        '"action" must be exactly "tool" or "conclude". Never repeat a tool call '
+        "whose evidence you already have. Once you have checked latency, the "
+        "error rate, and the deploy history, you MUST conclude."
     )
 
     def __init__(self, model: str = "claude-sonnet-4-5"):
@@ -162,14 +213,116 @@ class LLMPlanner:
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(b.text for b in msg.content if b.type == "text").strip()
-        # Be forgiving about fenced JSON.
-        if text.startswith("```"):
-            text = text.strip("`").split("\n", 1)[-1]
-        return Decision.from_dict(json.loads(text))
+        return _decision_from_model_json(text, state.incident.service)
+
+
+class GroqPlanner:
+    """Decide the next step with a small open model on Groq's cheap, fast API.
+
+    Optional; needs GROQ_API_KEY. The API is OpenAI-compatible and we call it
+    with the requests package already in the dependency list, so there is
+    nothing new to install. The default model costs a fraction of a cent per
+    incident, cheap enough for a reader to run the whole eval suite on.
+    JSON mode makes the small model reliable at the structured reply.
+    """
+
+    URL = "https://api.groq.com/openai/v1/chat/completions"
+
+    def __init__(self, model: str | None = None):
+        if not os.environ.get("GROQ_API_KEY"):
+            raise RuntimeError("GroqPlanner needs GROQ_API_KEY set")
+        # gpt-oss-20b is the cheapest model that reliably drives this loop; the
+        # 8B-class models below it compose bad PromQL and never conclude. An
+        # incident costs a fraction of a cent either way.
+        self._model = model or os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+
+    def next_step(self, state: InvestigationState) -> Decision:
+        import time
+
+        import requests
+
+        svc = state.incident.service
+        evidence = json.dumps(state.evidence, indent=2)
+        # Small models are unreliable at composing PromQL, so hand them the
+        # known-good queries; choosing WHICH signal to check next, and when to
+        # stop, is the decision we are paying the model for.
+        prompt = (
+            f"Incident: alert={state.incident.alert} service={svc}\n"
+            f"Known-good queries for this service:\n"
+            f"  p95 latency: {_p95_latency(svc)}\n"
+            f"  error ratio: {_error_ratio(svc)}\n"
+            f"Evidence so far:\n{evidence}\n\nWhat is the next step?"
+        )
+        # Free-tier keys rate-limit per minute; 429s are expected, transient,
+        # and retryable, the same lesson the ch06 tool wrapper teaches. A whole
+        # eval sweep sits at the limit for minutes, so be patient, and honor
+        # Retry-After when the server states it.
+        attempts = 8
+        json_mode = True
+        messages = [
+            {"role": "system", "content": LLMPlanner.SYSTEM},
+            {"role": "user", "content": prompt},
+        ]
+        for attempt in range(attempts):
+            body = {
+                "model": self._model,
+                # Reasoning models (gpt-oss) spend completion tokens thinking
+                # before the JSON; a tight cap truncates mid-reply. Tokens this
+                # cheap, be generous.
+                "max_tokens": 2048,
+                "temperature": 0,
+                "messages": messages,
+            }
+            if json_mode:
+                body["response_format"] = {"type": "json_object"}
+            resp = requests.post(
+                self.URL,
+                headers={"Authorization": f"Bearer {os.environ['GROQ_API_KEY']}"},
+                json=body,
+                timeout=30,
+            )
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if attempt == attempts - 1:
+                    resp.raise_for_status()
+                wait = float(resp.headers.get("retry-after") or 2 ** attempt)
+                time.sleep(min(wait, 60))
+                continue
+            if resp.status_code >= 400:
+                # Some models trip over strict JSON mode itself (the server
+                # validates the reply and 400s). Our parser is defensive anyway,
+                # so fall back to a plain completion once before giving up.
+                if json_mode and "json_validate_failed" in resp.text:
+                    json_mode = False
+                    continue
+                # Groq's 4xx bodies say what was wrong; surface that instead of
+                # a bare status code.
+                raise RuntimeError(f"groq {resp.status_code}: {resp.text[:300]}")
+            text = resp.json()["choices"][0]["message"]["content"] or ""
+            try:
+                return _decision_from_model_json(text, state.incident.service)
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                # A malformed reply is a transient failure, the same class as a
+                # 429: tell the model what went wrong and ask again.
+                if attempt == attempts - 1:
+                    raise RuntimeError(
+                        f"model reply unparseable after retries: {text[:200]!r}") from e
+                messages = messages + [
+                    {"role": "assistant", "content": text or "(empty)"},
+                    {"role": "user", "content":
+                        "That reply was not the required JSON. Reply with ONLY "
+                        "the JSON object, no prose."},
+                ]
+                continue
 
 
 def default_planner() -> Planner:
-    """Pick a planner from the environment. Scripted unless AGENT_PLANNER=llm."""
-    if os.environ.get("AGENT_PLANNER", "scripted").lower() == "llm":
+    """Pick a planner from the environment.
+
+    Scripted unless AGENT_PLANNER=llm (Anthropic) or AGENT_PLANNER=groq.
+    """
+    choice = os.environ.get("AGENT_PLANNER", "scripted").lower()
+    if choice == "llm":
         return LLMPlanner()
+    if choice == "groq":
+        return GroqPlanner()
     return ScriptedPlanner()

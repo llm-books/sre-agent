@@ -1,9 +1,11 @@
 psycopg[binary]>=3.1
 requests>=2.31
 PyYAML>=6.0
-# anthropic is optional, only needed for the real LLM planner.
+# anthropic is optional, only needed for the Anthropic LLM planner.
 # Install it (or `pip install anthropic`) and set ANTHROPIC_API_KEY to use it.
 # The scripted planner needs none of it and runs the durability demo offline.
+# The Groq planner (AGENT_PLANNER=groq) needs nothing beyond requests above;
+# just set GROQ_API_KEY.
 anthropic>=0.39 ; extra == "llm"
 redis>=5.0
 # ch09 observability: OpenTelemetry tracing, exported to Tempo over OTLP/HTTP.
